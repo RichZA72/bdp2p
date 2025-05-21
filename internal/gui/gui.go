@@ -1,232 +1,179 @@
 package gui
 
 import (
-    "encoding/json"
-    "fmt"
-    "image/color"
-    "net"
-    "os"
-    "os/exec"
-    "path/filepath"
-    "p2pfs/internal/fs"
-    "runtime"
-    "strings"
-    "time"
+	"fmt"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
+	"fyne.io/fyne/v2/widget"
 
-    "fyne.io/fyne/v2"
-    "fyne.io/fyne/v2/app"
-    "fyne.io/fyne/v2/canvas"
-    "fyne.io/fyne/v2/container"
-    "fyne.io/fyne/v2/layout"
-    "fyne.io/fyne/v2/widget"
+	"image/color"
+
+	"p2pfs/internal/fs"
+	"p2pfs/internal/peer"
 )
 
-type Peer struct {
-    ID   int    `json:"id"`
-    IP   string `json:"ip"`
-    Port string `json:"port"`
+type SelectedFile struct {
+	FileName string
+	PeerID   int
 }
-
-var grid *fyne.Container
-var selectedFile *fs.FileInfo
-var selectedHighlight *canvas.Rectangle
-var peers []Peer
-var localID int = 1 // esta máquina es Maq1
 
 func Run() {
-    a := app.New()
-    w := a.NewWindow("P2P File Explorer")
-    w.Resize(fyne.NewSize(1000, 700))
+	myApp := app.New()
+	myWindow := myApp.NewWindow("Sistema Distribuido P2P")
+	myWindow.Resize(fyne.NewSize(1200, 700))
 
-    loadPeers()
+	statusLabel := widget.NewLabel("Cargando archivos...")
+	selectedLabel := widget.NewLabel("Archivo seleccionado: ninguno")
 
-    eliminarBtn := widget.NewButton("Eliminar", func() {
-        if selectedFile == nil {
-            fmt.Println("No hay archivo seleccionado")
-            return
-        }
-        err := fs.DeleteFile(selectedFile.Path)
-        if err != nil {
-            fmt.Println("Error al eliminar:", err)
-        } else {
-            fmt.Println("Archivo eliminado:", selectedFile.Name)
-            selectedFile = nil
-            selectedHighlight = nil
-            refreshFiles()
-        }
-    })
+	grid := container.NewGridWithColumns(2)
+	scroll := container.NewVScroll(grid)
+	scroll.SetMinSize(fyne.NewSize(1000, 600))
 
-    transferirBtn := widget.NewButton("Transferir", func() {
-        if selectedFile == nil {
-            fmt.Println("No hay archivo seleccionado")
-            return
-        }
-        fmt.Printf("Simulando transferencia de '%s' al nodo destino...\n", selectedFile.Name)
-    })
+	var selectedFile *SelectedFile
+	var selectedButton *widget.Button
 
-    actualizarBtn := widget.NewButton("Actualizar", func() {
-        refreshFiles()
-    })
+	btnEliminar := widget.NewButtonWithIcon("Eliminar", theme.DeleteIcon(), func() {
+		if selectedFile != nil {
+			fmt.Printf("🗑️ Eliminar archivo %s de Maq%d\n", selectedFile.FileName, selectedFile.PeerID)
+		}
+	})
+	btnTransferir := widget.NewButtonWithIcon("Transferir", theme.MailForwardIcon(), func() {
+		if selectedFile != nil {
+			fmt.Printf("📤 Transferir archivo %s desde Maq%d\n", selectedFile.FileName, selectedFile.PeerID)
+		}
+	})
+	btnActualizar := widget.NewButtonWithIcon("Actualizar", theme.ViewRefreshIcon(), func() {
+		grid.Objects = nil
+		grid.Refresh()
+		go loadMachines(grid, statusLabel, selectedLabel, &selectedFile, &selectedButton)
+	})
 
-    maquinaEntry := widget.NewEntry()
-    maquinaEntry.SetPlaceHolder("Máquina:")
+	header := container.NewVBox(
+		canvas.NewText("Sistema Distribuido P2P", theme.ForegroundColor()),
+		container.NewHBox(btnEliminar, btnTransferir, btnActualizar, layout.NewSpacer(), selectedLabel),
+		statusLabel,
+	)
 
-    controlBar := container.NewHBox(
-        eliminarBtn,
-        transferirBtn,
-        actualizarBtn,
-        maquinaEntry,
-    )
+	myWindow.SetContent(container.NewBorder(header, nil, nil, nil, scroll))
+	myWindow.Show()
 
-    grid = container.NewGridWithColumns(2)
-    refreshFiles()
+	go loadMachines(grid, statusLabel, selectedLabel, &selectedFile, &selectedButton)
 
-    content := container.NewBorder(controlBar, nil, nil, nil, grid)
-    w.SetContent(content)
-    w.ShowAndRun()
+	myApp.Run()
 }
 
-func refreshFiles() {
-    os.MkdirAll("./shared", os.ModePerm)
-    localFiles, _ := fs.ListFiles("./shared")
+func loadMachines(
+	grid *fyne.Container,
+	statusLabel *widget.Label,
+	selectedLabel *widget.Label,
+	selectedFile **SelectedFile,
+	selectedButton **widget.Button,
+) {
+	peerSystem := peer.InitPeer()
+	if peerSystem == nil {
+		statusLabel.SetText("❌ Error al cargar peers.json")
+		return
+	}
 
-    panels := []fyne.CanvasObject{}
-    for _, p := range peers {
-        files := []fs.FileInfo{}
-        if p.ID == localID {
-            files = localFiles
-        }
-        panels = append(panels, renderTable(p, files))
-    }
+	localID := peerSystem.Local.ID
 
-    grid.Objects = panels
-    grid.Refresh()
+	colors := []color.Color{
+		color.NRGBA{R: 180, G: 220, B: 255, A: 255},
+		color.NRGBA{R: 200, G: 255, B: 200, A: 255},
+		color.NRGBA{R: 255, G: 220, B: 180, A: 255},
+		color.NRGBA{R: 255, G: 200, B: 200, A: 255},
+	}
+
+	for i, pinfo := range peerSystem.Peers {
+		files, err := fs.GetFilesByPeer(pinfo, localID)
+		isOnline := err == nil
+
+		title := canvas.NewText(fmt.Sprintf("Maq%d - %s:%s", pinfo.ID, pinfo.IP, pinfo.Port), nil)
+		title.TextStyle = fyne.TextStyle{Bold: true}
+		title.Alignment = fyne.TextAlignCenter
+
+		state := widget.NewLabel("🔴 Offline")
+		if isOnline {
+			state.SetText("🟢 En línea")
+		}
+
+		var fileWidgets []fyne.CanvasObject
+		if isOnline {
+			for _, file := range files {
+				name := file.Name
+				mod := file.ModTime.Format("02-Jan 15:04")
+
+				icon := getIconForFile(name)
+
+				btn := widget.NewButtonWithIcon(fmt.Sprintf("%s (%s)", name, mod), icon, nil)
+				btn.Alignment = widget.ButtonAlignLeading
+				btn.Importance = widget.MediumImportance
+
+				pid := pinfo.ID
+				fname := name
+				thisBtn := btn
+
+				btn.OnTapped = func() {
+					if *selectedButton != nil {
+						(*selectedButton).Importance = widget.MediumImportance
+						(*selectedButton).Refresh()
+					}
+					*selectedFile = &SelectedFile{FileName: fname, PeerID: pid}
+					*selectedButton = thisBtn
+
+					thisBtn.Importance = widget.HighImportance
+					thisBtn.Refresh()
+
+					selectedLabel.SetText("Archivo seleccionado: " + fname + " (Maq" + strconv.Itoa(pid) + ")")
+				}
+
+				fileWidgets = append(fileWidgets, btn)
+			}
+		} else {
+			fileWidgets = append(fileWidgets, widget.NewLabel("❌ No disponible"))
+		}
+
+		content := container.NewVBox(
+			title,
+			state,
+			widget.NewSeparator(),
+			container.NewVBox(fileWidgets...),
+		)
+
+		// Panel con borde de color
+		border := canvas.NewRectangle(colors[i%len(colors)])
+		border.StrokeWidth = 4
+		border.StrokeColor = colors[i%len(colors)]
+		border.FillColor = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+		border.SetMinSize(fyne.NewSize(500, 250))
+
+		panel := container.NewMax(border, container.NewPadded(content))
+		grid.Add(panel)
+		grid.Refresh()
+	}
+
+	statusLabel.SetText("✅ Carga completa.")
 }
 
-func renderTable(peer Peer, files []fs.FileInfo) *fyne.Container {
-    status := "🔴"
-    if peer.ID == localID || isPeerOnline(peer.IP, peer.Port) {
-        status = "🟢"
-    }
-
-    titleText := fmt.Sprintf("Maq%d (%s:%s) %s", peer.ID, peer.IP, peer.Port, status)
-    title := widget.NewLabelWithStyle(titleText, fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
-    titleBox := container.New(layout.NewCenterLayout(), title)
-
-    header := container.NewHBox(
-        widget.NewLabelWithStyle("Nombre", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-        layout.NewSpacer(),
-        widget.NewLabelWithStyle("Fecha de modificación", fyne.TextAlignTrailing, fyne.TextStyle{Bold: true}),
-    )
-
-    items := []fyne.CanvasObject{titleBox, header}
-
-    for _, f := range files {
-        modTime := ""
-        if info, err := os.Stat(f.Path); err == nil {
-            modTime = info.ModTime().Format("02/01/2006 03:04 p. m.")
-        }
-
-        icon := fileIcon(f)
-        name := widget.NewLabel(fmt.Sprintf("%s %s", icon, f.Name))
-        date := widget.NewLabel(modTime)
-        row := container.NewHBox(name, layout.NewSpacer(), date)
-
-        file := f
-        bg := canvas.NewRectangle(color.NRGBA{R: 0, G: 200, B: 255, A: 100})
-        bg.Hide()
-
-        fileBtn := widget.NewButton("", func() {
-            if selectedFile != nil && selectedFile.Path == file.Path {
-                openFile(file.Path)
-                return
-            }
-            if selectedHighlight != nil {
-                selectedHighlight.Hide()
-                canvas.Refresh(selectedHighlight)
-            }
-            selectedFile = &file
-            selectedHighlight = bg
-            bg.Show()
-            canvas.Refresh(bg)
-            fmt.Println("Archivo seleccionado:", file.Name)
-        })
-        fileBtn.Importance = widget.LowImportance
-        fileBtn.Resize(fyne.NewSize(0, 0))
-
-        item := container.NewMax(bg, row, fileBtn)
-        items = append(items, item)
-    }
-
-    content := container.NewVBox(items...)
-
-    // Bordes en todos los lados
-    lineColor := color.NRGBA{R: 180, G: 180, B: 180, A: 255}
-    top := canvas.NewLine(lineColor)
-    bottom := canvas.NewLine(lineColor)
-    left := canvas.NewLine(lineColor)
-    right := canvas.NewLine(lineColor)
-    top.StrokeWidth = 2
-    bottom.StrokeWidth = 2
-    left.StrokeWidth = 2
-    right.StrokeWidth = 2
-
-    bordered := container.NewBorder(top, bottom, left, right, content)
-    return bordered
-}
-
-func fileIcon(f fs.FileInfo) string {
-    if f.IsDir {
-        return "📁"
-    }
-
-    ext := strings.ToLower(filepath.Ext(f.Name))
-    switch ext {
-    case ".txt", ".pdf", ".docx":
-        return "📄"
-    case ".jpg", ".jpeg", ".png":
-        return "🖼️"
-    case ".mp3", ".wav":
-        return "🎵"
-    case ".mp4", ".avi", ".mkv":
-        return "🎥"
-    default:
-        return "❓"
-    }
-}
-
-func openFile(path string) {
-    var cmd *exec.Cmd
-    switch runtime.GOOS {
-    case "linux":
-        cmd = exec.Command("xdg-open", path)
-    case "windows":
-        cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", path)
-    case "darwin":
-        cmd = exec.Command("open", path)
-    }
-
-    if err := cmd.Start(); err != nil {
-        fmt.Println("No se pudo abrir el archivo:", err)
-    } else {
-        fmt.Println("Abriendo archivo:", path)
-    }
-}
-
-func loadPeers() {
-    data, err := os.ReadFile("config/peers.json")
-    if err != nil {
-        fmt.Println("No se pudo leer peers.json:", err)
-        return
-    }
-    json.Unmarshal(data, &peers)
-}
-
-func isPeerOnline(ip, port string) bool {
-    conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 500*time.Millisecond)
-    if err != nil {
-        return false
-    }
-    conn.Close()
-    return true
+func getIconForFile(name string) fyne.Resource {
+	ext := strings.ToLower(filepath.Ext(name))
+	switch ext {
+	case ".txt":
+		return theme.DocumentIcon()
+	case ".mp3":
+		return theme.MediaMusicIcon()
+	case ".jpg", ".png":
+		return theme.MediaPhotoIcon()
+	case ".mp4", ".avi":
+		return theme.MediaVideoIcon()
+	default:
+		return theme.FileIcon()
+	}
 }

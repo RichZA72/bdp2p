@@ -101,22 +101,6 @@ func (p *Peer) GetPeerStatuses() []PeerStatus {
 	return statuses
 }
 
-func StartServer(port string) {
-	listener, err := net.Listen("tcp", ":"+port)
-	if err != nil {
-		fmt.Println("❌ Error iniciando servidor TCP:", err)
-		return
-	}
-	fmt.Println("🟢 Servidor TCP escuchando en el puerto", port)
-
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			continue
-		}
-		conn.Close() // aún sin lógica de mensajes
-	}
-}
 
 func Start() {
 	p := InitPeer()

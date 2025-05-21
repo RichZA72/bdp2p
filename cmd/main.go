@@ -6,6 +6,11 @@ import (
 )
 
 func main() {
-	go peer.Start()  // Servidor TCP en segundo plano
-	gui.Run()        // GUI bloquea y permanece abierta
+	peerSystem := peer.InitPeer()
+	if peerSystem == nil {
+		return
+	}
+
+	go peer.StartServer(peerSystem.Local.Port)
+	gui.Run(peerSystem)
 }

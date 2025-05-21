@@ -24,7 +24,7 @@ type SelectedFile struct {
 	PeerID   int
 }
 
-func Run() {
+func Run(peerSystem *peer.Peer) {
 	myApp := app.New()
 	myWindow := myApp.NewWindow("Sistema Distribuido P2P")
 	myWindow.Resize(fyne.NewSize(1200, 700))
@@ -52,7 +52,7 @@ func Run() {
 	btnActualizar := widget.NewButtonWithIcon("Actualizar", theme.ViewRefreshIcon(), func() {
 		grid.Objects = nil
 		grid.Refresh()
-		go loadMachines(grid, statusLabel, selectedLabel, &selectedFile, &selectedButton)
+		go loadMachines(peerSystem, grid, statusLabel, selectedLabel, &selectedFile, &selectedButton)
 	})
 
 	header := container.NewVBox(
@@ -64,19 +64,20 @@ func Run() {
 	myWindow.SetContent(container.NewBorder(header, nil, nil, nil, scroll))
 	myWindow.Show()
 
-	go loadMachines(grid, statusLabel, selectedLabel, &selectedFile, &selectedButton)
+	go loadMachines(peerSystem, grid, statusLabel, selectedLabel, &selectedFile, &selectedButton)
 
 	myApp.Run()
 }
 
 func loadMachines(
+	peerSystem *peer.Peer,
 	grid *fyne.Container,
 	statusLabel *widget.Label,
 	selectedLabel *widget.Label,
 	selectedFile **SelectedFile,
 	selectedButton **widget.Button,
 ) {
-	peerSystem := peer.InitPeer()
+	//peerSystem := peer.InitPeer()
 	if peerSystem == nil {
 		statusLabel.SetText("❌ Error al cargar peers.json")
 		return

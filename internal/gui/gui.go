@@ -1,10 +1,17 @@
 package gui
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"net"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	
+	"image/color"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
@@ -13,10 +20,8 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"image/color"
-
-	"p2pfs/internal/fs"
 	"p2pfs/internal/peer"
+	"p2pfs/internal/fs"
 )
 
 type SelectedFile struct {
@@ -38,18 +43,57 @@ func Run(peerSystem *peer.Peer) {
 
 	var selectedFile *SelectedFile
 	var selectedButton *widget.Button
+	localID := peerSystem.Local.ID
 
-	btnEliminar := widget.NewButtonWithIcon("Eliminar", theme.DeleteIcon(), func() {
-		if selectedFile != nil {
-			fmt.Printf("🗑️ Eliminar archivo %s de Maq%d\n", selectedFile.FileName, selectedFile.PeerID)
+	deleteButton := widget.NewButtonWithIcon("Eliminar", theme.DeleteIcon(), func() {
+		if selectedFile == nil {
+			statusLabel.SetText("❌ Selecciona un archivo para eliminar.")
+			return
+		}
+		if selectedFile.PeerID == localID {
+			err := os.Remove(filepath.Join("shared", selectedFile.FileName))
+			if err != nil {
+				statusLabel.SetText("❌ Error al eliminar archivo local.")
+				return
+			}
+			statusLabel.SetText("🗑️ Archivo eliminado localmente.")
+		} else {
+			for _, peer := range peerSystem.Peers {
+				if peer.ID == selectedFile.PeerID {
+					go deleteFileRemotely(peer, selectedFile.FileName)
+					statusLabel.SetText("🗑️ Solicitud enviada para eliminar archivo remoto.")
+					break
+				}
+			}
 		}
 	})
-	btnTransferir := widget.NewButtonWithIcon("Transferir", theme.MailForwardIcon(), func() {
-		if selectedFile != nil {
-			fmt.Printf("📤 Transferir archivo %s desde Maq%d\n", selectedFile.FileName, selectedFile.PeerID)
+
+	transferButton := widget.NewButtonWithIcon("Transferir", theme.MailForwardIcon(), func() {
+		if selectedFile == nil {
+			statusLabel.SetText("❌ Selecciona un archivo para transferir.")
+			return
+		}
+		if selectedFile.PeerID == localID {
+			// local -> otros
+			for _, peer := range peerSystem.Peers {
+				if peer.ID != localID {
+					go sendFileToPeer(peer, selectedFile.FileName)
+				}
+			}
+			statusLabel.SetText("📤 Archivo enviado a otras máquinas.")
+		} else {
+			// remoto -> local
+			for _, peer := range peerSystem.Peers {
+				if peer.ID == selectedFile.PeerID {
+					go requestFileFromPeer(peer, selectedFile.FileName)
+					statusLabel.SetText("⬇️ Archivo solicitado desde máquina remota.")
+					break
+				}
+			}
 		}
 	})
-	btnActualizar := widget.NewButtonWithIcon("Actualizar", theme.ViewRefreshIcon(), func() {
+
+	refreshButton := widget.NewButtonWithIcon("Actualizar", theme.ViewRefreshIcon(), func() {
 		grid.Objects = nil
 		grid.Refresh()
 		go loadMachines(peerSystem, grid, statusLabel, selectedLabel, &selectedFile, &selectedButton)
@@ -57,7 +101,7 @@ func Run(peerSystem *peer.Peer) {
 
 	header := container.NewVBox(
 		canvas.NewText("Sistema Distribuido P2P", theme.ForegroundColor()),
-		container.NewHBox(btnEliminar, btnTransferir, btnActualizar, layout.NewSpacer(), selectedLabel),
+		container.NewHBox(deleteButton, transferButton, refreshButton, layout.NewSpacer(), selectedLabel),
 		statusLabel,
 	)
 
@@ -65,7 +109,6 @@ func Run(peerSystem *peer.Peer) {
 	myWindow.Show()
 
 	go loadMachines(peerSystem, grid, statusLabel, selectedLabel, &selectedFile, &selectedButton)
-
 	myApp.Run()
 }
 
@@ -77,14 +120,7 @@ func loadMachines(
 	selectedFile **SelectedFile,
 	selectedButton **widget.Button,
 ) {
-	//peerSystem := peer.InitPeer()
-	if peerSystem == nil {
-		statusLabel.SetText("❌ Error al cargar peers.json")
-		return
-	}
-
 	localID := peerSystem.Local.ID
-
 	colors := []color.Color{
 		color.NRGBA{R: 180, G: 220, B: 255, A: 255},
 		color.NRGBA{R: 200, G: 255, B: 200, A: 255},
@@ -112,7 +148,6 @@ func loadMachines(
 				mod := file.ModTime.Format("02-Jan 15:04")
 
 				icon := getIconForFile(name)
-
 				btn := widget.NewButtonWithIcon(fmt.Sprintf("%s (%s)", name, mod), icon, nil)
 				btn.Alignment = widget.ButtonAlignLeading
 				btn.Importance = widget.MediumImportance
@@ -141,14 +176,8 @@ func loadMachines(
 			fileWidgets = append(fileWidgets, widget.NewLabel("❌ No disponible"))
 		}
 
-		content := container.NewVBox(
-			title,
-			state,
-			widget.NewSeparator(),
-			container.NewVBox(fileWidgets...),
-		)
+		content := container.NewVBox(title, state, widget.NewSeparator(), container.NewVBox(fileWidgets...))
 
-		// Panel con borde de color
 		border := canvas.NewRectangle(colors[i%len(colors)])
 		border.StrokeWidth = 4
 		border.StrokeColor = colors[i%len(colors)]
@@ -177,4 +206,66 @@ func getIconForFile(name string) fyne.Resource {
 	default:
 		return theme.FileIcon()
 	}
+}
+
+func sendFileToPeer(peer peer.PeerInfo, filename string) {
+	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", peer.IP, peer.Port))
+	if err != nil {
+		fmt.Println("❌ No se pudo conectar a", peer.IP)
+		return
+	}
+	defer conn.Close()
+
+	data, err := os.ReadFile(filepath.Join("shared", filename))
+	if err != nil {
+		fmt.Println("❌ No se pudo leer el archivo:", err)
+		return
+	}
+
+	msg := map[string]interface{}{
+		"type":    "SEND_FILE",
+		"name":    filename,
+		"content": base64.StdEncoding.EncodeToString(data),
+	}
+	json.NewEncoder(conn).Encode(msg)
+}
+
+func requestFileFromPeer(peer peer.PeerInfo, filename string) {
+	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", peer.IP, peer.Port))
+	if err != nil {
+		fmt.Println("❌ No se pudo conectar a", peer.IP)
+		return
+	}
+	defer conn.Close()
+
+	req := map[string]interface{}{
+		"type": "GET_FILE",
+		"name": filename,
+	}
+	json.NewEncoder(conn).Encode(req)
+
+	var resp map[string]interface{}
+	err = json.NewDecoder(conn).Decode(&resp)
+	if err != nil || resp["type"] != "FILE_CONTENT" {
+		fmt.Println("❌ Error al recibir archivo:", err)
+		return
+	}
+
+	decoded, _ := base64.StdEncoding.DecodeString(resp["content"].(string))
+	os.WriteFile(filepath.Join("shared", filename), decoded, 0644)
+}
+
+func deleteFileRemotely(peer peer.PeerInfo, filename string) {
+	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", peer.IP, peer.Port))
+	if err != nil {
+		fmt.Println("❌ No se pudo conectar a", peer.IP)
+		return
+	}
+	defer conn.Close()
+
+	req := map[string]interface{}{
+		"type": "DELETE_FILE",
+		"name": filename,
+	}
+	json.NewEncoder(conn).Encode(req)
 }

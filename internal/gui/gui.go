@@ -33,6 +33,7 @@ type SelectedFile struct {
 
 func Run(peerSystem *peer.Peer) {
 	myApp := app.New()
+	myApp.Settings().SetTheme(theme.LightTheme())
 	myWindow := myApp.NewWindow("Sistema Distribuido P2P")
 	myWindow.Resize(fyne.NewSize(1200, 700))
 

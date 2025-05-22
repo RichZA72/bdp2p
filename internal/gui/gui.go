@@ -118,7 +118,28 @@ func Run(peerSystem *peer.Peer) {
 	}
 
 	for i, pinfo := range peerSystem.Peers {
-		title := canvas.NewText(fmt.Sprintf("Maq%d - %s:%s", pinfo.ID, pinfo.IP, pinfo.Port), nil)
+
+
+/*		//title := canvas.NewText(fmt.Sprintf("Maq%d - %s:%s", pinfo.ID, pinfo.IP, pinfo.Port), nil)
+		//name :=fmt,Sprintf("Maq%d - %s:%s", pinfo.ID, pinfo.IP, pinfo.Port)
+		name := fmt.Sprintf("Máquina %d", pinfo.ID, pinfo.IP, pinfo.Port)
+		if pinfo.ID == localID {
+    		name += " (Local)"
+		}
+		title := canvas.NewText(name, color.White)
+
+*/
+
+		
+label := fmt.Sprintf("Máquina %d", pinfo.ID)
+if pinfo.ID == localID {
+    label += " (Local)"
+}
+label += fmt.Sprintf(" - %s:%s", pinfo.IP, pinfo.Port)
+
+title := canvas.NewText(label, color.White)
+
+
 		title.TextStyle = fyne.TextStyle{Bold: true}
 		title.Alignment = fyne.TextAlignCenter
 

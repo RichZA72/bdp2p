@@ -9,7 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	
+	"time"
+
 	"image/color"
 
 	"fyne.io/fyne/v2"
@@ -36,6 +37,7 @@ func Run(peerSystem *peer.Peer) {
 
 	statusLabel := widget.NewLabel("Cargando archivos...")
 	selectedLabel := widget.NewLabel("Archivo seleccionado: ninguno")
+	syncIcon := widget.NewLabel("✅ Actualizado")
 
 	grid := container.NewGridWithColumns(2)
 	scroll := container.NewVScroll(grid)
@@ -74,7 +76,6 @@ func Run(peerSystem *peer.Peer) {
 			return
 		}
 		if selectedFile.PeerID == localID {
-			// local -> otros
 			for _, peer := range peerSystem.Peers {
 				if peer.ID != localID {
 					go sendFileToPeer(peer, selectedFile.FileName)
@@ -82,7 +83,6 @@ func Run(peerSystem *peer.Peer) {
 			}
 			statusLabel.SetText("📤 Archivo enviado a otras máquinas.")
 		} else {
-			// remoto -> local
 			for _, peer := range peerSystem.Peers {
 				if peer.ID == selectedFile.PeerID {
 					go requestFileFromPeer(peer, selectedFile.FileName)
@@ -93,24 +93,31 @@ func Run(peerSystem *peer.Peer) {
 		}
 	})
 
-	refreshButton := widget.NewButtonWithIcon("Actualizar", theme.ViewRefreshIcon(), func() {
-		grid.Objects = nil
-		grid.Refresh()
-		go loadMachines(peerSystem, grid, statusLabel, selectedLabel, &selectedFile, &selectedButton)
-	})
-
 	header := container.NewVBox(
 		canvas.NewText("Sistema Distribuido P2P", theme.ForegroundColor()),
-		container.NewHBox(deleteButton, transferButton, refreshButton, layout.NewSpacer(), selectedLabel),
-		statusLabel,
+		container.NewHBox(deleteButton, transferButton, layout.NewSpacer(), syncIcon),
+		container.NewHBox(statusLabel, layout.NewSpacer(), selectedLabel),
 	)
 
 	myWindow.SetContent(container.NewBorder(header, nil, nil, nil, scroll))
 	myWindow.Show()
 
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		for range ticker.C {
+			syncIcon.SetText("🔄 Sincronizando...")
+			grid.Objects = nil
+			grid.Refresh()
+			loadMachines(peerSystem, grid, statusLabel, selectedLabel, &selectedFile, &selectedButton)
+			syncIcon.SetText("✅ Actualizado")
+		}
+	}()
+
 	go loadMachines(peerSystem, grid, statusLabel, selectedLabel, &selectedFile, &selectedButton)
 	myApp.Run()
 }
+
+// --- Auxiliares: se mantienen igual ---
 
 func loadMachines(
 	peerSystem *peer.Peer,
@@ -166,7 +173,6 @@ func loadMachines(
 
 					thisBtn.Importance = widget.HighImportance
 					thisBtn.Refresh()
-
 					selectedLabel.SetText("Archivo seleccionado: " + fname + " (Maq" + strconv.Itoa(pid) + ")")
 				}
 
@@ -177,7 +183,6 @@ func loadMachines(
 		}
 
 		content := container.NewVBox(title, state, widget.NewSeparator(), container.NewVBox(fileWidgets...))
-
 		border := canvas.NewRectangle(colors[i%len(colors)])
 		border.StrokeWidth = 4
 		border.StrokeColor = colors[i%len(colors)]
@@ -188,7 +193,6 @@ func loadMachines(
 		grid.Add(panel)
 		grid.Refresh()
 	}
-
 	statusLabel.SetText("✅ Carga completa.")
 }
 

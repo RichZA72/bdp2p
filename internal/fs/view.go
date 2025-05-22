@@ -59,6 +59,7 @@ func GetRemoteFiles(ip, port string) ([]FileInfo, error) {
 		return nil, err
 	}
 
+/*
 	var result []FileInfo
 	if response["type"] == "FILES_LIST" {
 		rawFiles := response["files"].([]interface{})
@@ -72,7 +73,36 @@ func GetRemoteFiles(ip, port string) ([]FileInfo, error) {
 		}
 	}
 
-	return result, nil
+*/
+var result []FileInfo
+
+if response["type"] == "FILES_LIST" {
+    raw, ok := response["files"]
+    if !ok {
+        fmt.Println("❌ 'files' no encontrado en la respuesta")
+        return result, nil
+    }
+
+    rawFiles, ok := raw.([]interface{})
+    if !ok || rawFiles == nil {
+        fmt.Println("❌ 'files' no es una lista válida o es nil")
+        return result, nil
+    }
+
+    for _, item := range rawFiles {
+        f := item.(map[string]interface{})
+        modTime, _ := time.Parse(time.RFC3339, f["modTime"].(string))
+        result = append(result, FileInfo{
+            Name:    f["name"].(string),
+            ModTime: modTime,
+        })
+    }
+}
+
+return result, nil
+	
+
+
 }
 
 func GetFilesByPeer(p peer.PeerInfo, localID int) ([]FileInfo, error) {

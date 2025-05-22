@@ -27,6 +27,8 @@ import (
 
     "p2pfs/internal/peer"
     "p2pfs/internal/fs"
+	logger "p2pfs/internal/log"
+
 )
 
 // Estructura para almacenar el archivo seleccionado
@@ -144,6 +146,145 @@ func Run(peerSystem *peer.Peer) {
         grid.Add(panel)
     }
 
+
+go func() {
+    ticker := time.NewTicker(5 * time.Second)
+    offlineMap := make(map[int]bool)
+
+    for range ticker.C {
+        syncIcon.SetText("🔄 Sincronizando...")
+
+        for _, pinfo := range peerSystem.Peers {
+            files, err := fs.GetFilesByPeer(pinfo, localID)
+            isOnline := err == nil
+            wasOffline := offlineMap[pinfo.ID]
+            offlineMap[pinfo.ID] = !isOnline
+
+            if isOnline {
+                machineStates[pinfo.ID].SetText("🟢 En línea")
+            } else {
+                machineStates[pinfo.ID].SetText("🔴 Offline")
+            }
+
+            // ✅ Si se reconectó, enviamos logs
+            if isOnline && wasOffline && pinfo.ID != localID {
+                go sendLogsToPeer(pinfo)
+                statusLabel.SetText(fmt.Sprintf("📤 Logs enviados a Maq%d tras reconexión", pinfo.ID))
+            }
+
+            machineFileLists[pinfo.ID].Objects = nil
+            if isOnline {
+                for _, file := range files {
+                    name := file.Name
+                    mod := file.ModTime.Format("02-Jan 15:04")
+                    icon := getIconForFile(name)
+                    btn := widget.NewButtonWithIcon(fmt.Sprintf("%s (%s)", name, mod), icon, nil)
+                    btn.Alignment = widget.ButtonAlignLeading
+                    btn.Importance = widget.MediumImportance
+                    pid := pinfo.ID
+                    fname := name
+                    thisBtn := btn
+                    var lastClick time.Time
+
+                    btn.OnTapped = func() {
+                        now := time.Now()
+                        if selectedButton != nil {
+                            (*selectedButton).Importance = widget.MediumImportance
+                            (*selectedButton).Refresh()
+                        }
+                        selectedFile = &SelectedFile{FileName: fname, PeerID: pid}
+                        selectedButton = thisBtn
+                        thisBtn.Importance = widget.HighImportance
+                        thisBtn.Refresh()
+                        selectedLabel.SetText("Archivo seleccionado: " + fname + " (Maq" + strconv.Itoa(pid) + ")")
+                        if pid == localID && now.Sub(lastClick) < 500*time.Millisecond {
+                            go openFile(fname)
+                        }
+                        lastClick = now
+                    }
+                    machineFileLists[pinfo.ID].Add(btn)
+                }
+            }
+            machineFileLists[pinfo.ID].Refresh()
+        }
+
+        syncIcon.SetText("✅ Actualizado")
+    }
+}()
+
+
+
+
+/*
+go func() {
+    ticker := time.NewTicker(5 * time.Second)
+    offlineMap := make(map[int]bool)
+
+    for range ticker.C {
+        syncIcon.SetText("🔄 Sincronizando...")
+
+        localFiles, _ := fs.GetLocalFiles()
+
+        for _, pinfo := range peerSystem.Peers {
+            files, err := fs.GetFilesByPeer(pinfo, localID)
+            isOnline := err == nil
+            wasOffline := offlineMap[pinfo.ID]
+            offlineMap[pinfo.ID] = !isOnline
+
+            if isOnline {
+                machineStates[pinfo.ID].SetText("🟢 En línea")
+            } else {
+                machineStates[pinfo.ID].SetText("🔴 Offline")
+            }
+
+            // ✅ Si el nodo se reconectó, enviamos los logs
+            if isOnline && wasOffline && pinfo.ID != localID {
+                go sendLogsToPeer(pinfo)
+                statusLabel.SetText(fmt.Sprintf("📤 Logs enviados a Maq%d tras reconexión", pinfo.ID))
+            }
+
+            machineFileLists[pinfo.ID].Objects = nil
+            if isOnline {
+                for _, file := range files {
+                    name := file.Name
+                    mod := file.ModTime.Format("02-Jan 15:04")
+                    icon := getIconForFile(name)
+                    btn := widget.NewButtonWithIcon(fmt.Sprintf("%s (%s)", name, mod), icon, nil)
+                    btn.Alignment = widget.ButtonAlignLeading
+                    btn.Importance = widget.MediumImportance
+                    pid := pinfo.ID
+                    fname := name
+                    thisBtn := btn
+                    var lastClick time.Time
+
+                    btn.OnTapped = func() {
+                        now := time.Now()
+                        if selectedButton != nil {
+                            (*selectedButton).Importance = widget.MediumImportance
+                            (*selectedButton).Refresh()
+                        }
+                        selectedFile = &SelectedFile{FileName: fname, PeerID: pid}
+                        selectedButton = thisBtn
+                        thisBtn.Importance = widget.HighImportance
+                        thisBtn.Refresh()
+                        selectedLabel.SetText("Archivo seleccionado: " + fname + " (Maq" + strconv.Itoa(pid) + ")")
+                        if pid == localID && now.Sub(lastClick) < 500*time.Millisecond {
+                            go openFile(fname)
+                        }
+                        lastClick = now
+                    }
+                    machineFileLists[pinfo.ID].Add(btn)
+                }
+            }
+            machineFileLists[pinfo.ID].Refresh()
+        }
+
+        syncIcon.SetText("✅ Actualizado")
+    }
+}()
+
+
+
     go func() {
         ticker := time.NewTicker(5 * time.Second)
         for range ticker.C {
@@ -193,9 +334,36 @@ func Run(peerSystem *peer.Peer) {
             syncIcon.SetText("✅ Actualizado")
         }
     }()
+*/
 
-    myApp.Run()
+
+
+		 myApp.Run()
 }
+
+
+func sendLogsToPeer(pinfo peer.PeerInfo) {
+    conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", pinfo.IP, pinfo.Port))
+    if err != nil {
+        fmt.Println("❌ No se pudo conectar a", pinfo.IP, "para enviar logs.")
+        return
+    }
+    defer conn.Close()
+
+    logs := logger.GetLogs()
+    msg := map[string]interface{}{
+        "type": "SYNC_LOGS",
+        "logs": logs,
+    }
+
+    err = json.NewEncoder(conn).Encode(msg)
+    if err != nil {
+        fmt.Println("❌ Error al enviar logs:", err)
+    } else {
+        fmt.Println("📤 Logs enviados a Maq", pinfo.ID)
+    }
+}
+
 
 // ✅ Diálogo para seleccionar peers con opción "Todas las máquinas"
 func showPeerSelectionDialog(parent fyne.Window, ps *peer.Peer, filename string, statusLabel *widget.Label) {
@@ -252,14 +420,6 @@ func showPeerSelectionDialog(parent fyne.Window, ps *peer.Peer, filename string,
 	dlg := dialog.NewCustom("Seleccionar destino", "Cancelar", dialogContent, parent)
 	dlg.Resize(fyne.NewSize(400, 300))
 	dlg.Show()
-
-
-/*
-    win := fyne.CurrentApp().NewWindow("Seleccionar destino")
-    win.SetContent(dialogContent)
-    win.Resize(fyne.NewSize(400, 300))
-    win.Show()
-*/
 }
 
 // Abre un archivo local con el programa predeterminado

@@ -1,3 +1,4 @@
+// Nuevo gui.go optimizado
 package gui
 
 import (
@@ -40,6 +41,10 @@ func Run(peerSystem *peer.Peer) {
 	syncIcon := widget.NewLabel("✅ Actualizado")
 
 	grid := container.NewGridWithColumns(2)
+	machinePanels := make(map[int]*fyne.Container)
+	machineStates := make(map[int]*widget.Label)
+	machineFileLists := make(map[int]*fyne.Container)
+
 	scroll := container.NewVScroll(grid)
 	scroll.SetMinSize(fyne.NewSize(1000, 600))
 
@@ -102,32 +107,7 @@ func Run(peerSystem *peer.Peer) {
 	myWindow.SetContent(container.NewBorder(header, nil, nil, nil, scroll))
 	myWindow.Show()
 
-	go func() {
-		ticker := time.NewTicker(5 * time.Second)
-		for range ticker.C {
-			syncIcon.SetText("🔄 Sincronizando...")
-			grid.Objects = nil
-			grid.Refresh()
-			loadMachines(peerSystem, grid, statusLabel, selectedLabel, &selectedFile, &selectedButton)
-			syncIcon.SetText("✅ Actualizado")
-		}
-	}()
-
-	go loadMachines(peerSystem, grid, statusLabel, selectedLabel, &selectedFile, &selectedButton)
-	myApp.Run()
-}
-
-// --- Auxiliares: se mantienen igual ---
-
-func loadMachines(
-	peerSystem *peer.Peer,
-	grid *fyne.Container,
-	statusLabel *widget.Label,
-	selectedLabel *widget.Label,
-	selectedFile **SelectedFile,
-	selectedButton **widget.Button,
-) {
-	localID := peerSystem.Local.ID
+	// Crear paneles fijos por máquina
 	colors := []color.Color{
 		color.NRGBA{R: 180, G: 220, B: 255, A: 255},
 		color.NRGBA{R: 200, G: 255, B: 200, A: 255},
@@ -136,53 +116,17 @@ func loadMachines(
 	}
 
 	for i, pinfo := range peerSystem.Peers {
-		files, err := fs.GetFilesByPeer(pinfo, localID)
-		isOnline := err == nil
-
 		title := canvas.NewText(fmt.Sprintf("Maq%d - %s:%s", pinfo.ID, pinfo.IP, pinfo.Port), nil)
 		title.TextStyle = fyne.TextStyle{Bold: true}
 		title.Alignment = fyne.TextAlignCenter
 
 		state := widget.NewLabel("🔴 Offline")
-		if isOnline {
-			state.SetText("🟢 En línea")
-		}
+		machineStates[pinfo.ID] = state
 
-		var fileWidgets []fyne.CanvasObject
-		if isOnline {
-			for _, file := range files {
-				name := file.Name
-				mod := file.ModTime.Format("02-Jan 15:04")
+		fileList := container.NewVBox()
+		machineFileLists[pinfo.ID] = fileList
 
-				icon := getIconForFile(name)
-				btn := widget.NewButtonWithIcon(fmt.Sprintf("%s (%s)", name, mod), icon, nil)
-				btn.Alignment = widget.ButtonAlignLeading
-				btn.Importance = widget.MediumImportance
-
-				pid := pinfo.ID
-				fname := name
-				thisBtn := btn
-
-				btn.OnTapped = func() {
-					if *selectedButton != nil {
-						(*selectedButton).Importance = widget.MediumImportance
-						(*selectedButton).Refresh()
-					}
-					*selectedFile = &SelectedFile{FileName: fname, PeerID: pid}
-					*selectedButton = thisBtn
-
-					thisBtn.Importance = widget.HighImportance
-					thisBtn.Refresh()
-					selectedLabel.SetText("Archivo seleccionado: " + fname + " (Maq" + strconv.Itoa(pid) + ")")
-				}
-
-				fileWidgets = append(fileWidgets, btn)
-			}
-		} else {
-			fileWidgets = append(fileWidgets, widget.NewLabel("❌ No disponible"))
-		}
-
-		content := container.NewVBox(title, state, widget.NewSeparator(), container.NewVBox(fileWidgets...))
+		content := container.NewVBox(title, state, widget.NewSeparator(), fileList)
 		border := canvas.NewRectangle(colors[i%len(colors)])
 		border.StrokeWidth = 4
 		border.StrokeColor = colors[i%len(colors)]
@@ -190,10 +134,55 @@ func loadMachines(
 		border.SetMinSize(fyne.NewSize(500, 250))
 
 		panel := container.NewMax(border, container.NewPadded(content))
+		machinePanels[pinfo.ID] = panel
 		grid.Add(panel)
-		grid.Refresh()
 	}
-	statusLabel.SetText("✅ Carga completa.")
+
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		for range ticker.C {
+			syncIcon.SetText("🔄 Sincronizando...")
+			for _, pinfo := range peerSystem.Peers {
+				files, err := fs.GetFilesByPeer(pinfo, localID)
+				isOnline := err == nil
+				if isOnline {
+					machineStates[pinfo.ID].SetText("🟢 En línea")
+				} else {
+					machineStates[pinfo.ID].SetText("🔴 Offline")
+				}
+				machineFileLists[pinfo.ID].Objects = nil
+				if isOnline {
+					for _, file := range files {
+						name := file.Name
+						mod := file.ModTime.Format("02-Jan 15:04")
+						icon := getIconForFile(name)
+						btn := widget.NewButtonWithIcon(fmt.Sprintf("%s (%s)", name, mod), icon, nil)
+						btn.Alignment = widget.ButtonAlignLeading
+						btn.Importance = widget.MediumImportance
+						pid := pinfo.ID
+						fname := name
+						thisBtn := btn
+						btn.OnTapped = func() {
+							if selectedButton != nil {
+								(*selectedButton).Importance = widget.MediumImportance
+								(*selectedButton).Refresh()
+							}
+							selectedFile = &SelectedFile{FileName: fname, PeerID: pid}
+							selectedButton = thisBtn
+							thisBtn.Importance = widget.HighImportance
+							thisBtn.Refresh()
+							selectedLabel.SetText("Archivo seleccionado: " + fname + " (Maq" + strconv.Itoa(pid) + ")")
+						}
+						machineFileLists[pinfo.ID].Add(btn)
+					}
+				}
+				machineFileLists[pinfo.ID].Refresh()
+			}
+			syncIcon.SetText("✅ Actualizado")
+		}
+	}()
+
+	myApp.Run()
 }
 
 func getIconForFile(name string) fyne.Resource {

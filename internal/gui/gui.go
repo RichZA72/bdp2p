@@ -1,4 +1,4 @@
-// Nuevo gui.go optimizado
+// gui.go con tema oscuro, doble clic en archivos locales, sincronización optimizada
 package gui
 
 import (
@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -33,7 +35,7 @@ type SelectedFile struct {
 
 func Run(peerSystem *peer.Peer) {
 	myApp := app.New()
-	myApp.Settings().SetTheme(theme.LightTheme())
+	myApp.Settings().SetTheme(theme.DarkTheme())
 	myWindow := myApp.NewWindow("Sistema Distribuido P2P")
 	myWindow.Resize(fyne.NewSize(1200, 700))
 
@@ -108,7 +110,6 @@ func Run(peerSystem *peer.Peer) {
 	myWindow.SetContent(container.NewBorder(header, nil, nil, nil, scroll))
 	myWindow.Show()
 
-	// Crear paneles fijos por máquina
 	colors := []color.Color{
 		color.NRGBA{R: 180, G: 220, B: 255, A: 255},
 		color.NRGBA{R: 200, G: 255, B: 200, A: 255},
@@ -131,7 +132,7 @@ func Run(peerSystem *peer.Peer) {
 		border := canvas.NewRectangle(colors[i%len(colors)])
 		border.StrokeWidth = 4
 		border.StrokeColor = colors[i%len(colors)]
-		border.FillColor = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+		border.FillColor = color.NRGBA{R: 20, G: 20, B: 20, A: 255}
 		border.SetMinSize(fyne.NewSize(500, 250))
 
 		panel := container.NewMax(border, container.NewPadded(content))
@@ -163,7 +164,9 @@ func Run(peerSystem *peer.Peer) {
 						pid := pinfo.ID
 						fname := name
 						thisBtn := btn
+						var lastClick time.Time
 						btn.OnTapped = func() {
+							now := time.Now()
 							if selectedButton != nil {
 								(*selectedButton).Importance = widget.MediumImportance
 								(*selectedButton).Refresh()
@@ -173,6 +176,10 @@ func Run(peerSystem *peer.Peer) {
 							thisBtn.Importance = widget.HighImportance
 							thisBtn.Refresh()
 							selectedLabel.SetText("Archivo seleccionado: " + fname + " (Maq" + strconv.Itoa(pid) + ")")
+							if pid == localID && now.Sub(lastClick) < 500*time.Millisecond {
+								go openFile(fname)
+							}
+							lastClick = now
 						}
 						machineFileLists[pinfo.ID].Add(btn)
 					}
@@ -184,6 +191,23 @@ func Run(peerSystem *peer.Peer) {
 	}()
 
 	myApp.Run()
+}
+
+func openFile(name string) {
+	fullPath := filepath.Join("shared", name)
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "linux":
+		cmd = exec.Command("xdg-open", fullPath)
+	case "darwin":
+		cmd = exec.Command("open", fullPath)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", fullPath)
+	}
+	err := cmd.Start()
+	if err != nil {
+		fmt.Println("❌ Error al abrir el archivo:", err)
+	}
 }
 
 func getIconForFile(name string) fyne.Resource {

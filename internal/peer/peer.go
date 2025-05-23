@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"p2pfs/internal/state"
 )
 
 type PeerInfo struct {
@@ -25,6 +27,8 @@ type PeerStatus struct {
 	Peer   PeerInfo
 	Online bool
 }
+
+var instanciaGlobal *Peer
 
 func LoadPeers(configPath string) (*Peer, error) {
 	fmt.Println("📄 Leyendo archivo:", configPath)
@@ -60,10 +64,12 @@ func LoadPeers(configPath string) (*Peer, error) {
 		return nil, nil
 	}
 
-	return &Peer{
+	peer := &Peer{
 		Local: local,
 		Peers: peers,
-	}, nil
+	}
+	instanciaGlobal = peer
+	return peer, nil
 }
 
 func InitPeer() *Peer {
@@ -101,7 +107,6 @@ func (p *Peer) GetPeerStatuses() []PeerStatus {
 	return statuses
 }
 
-
 func Start() {
 	p := InitPeer()
 	if p == nil {
@@ -109,4 +114,23 @@ func Start() {
 		return
 	}
 	go StartServer(p.Local.Port)
+}
+
+func ActualizarEstadoDeNodo(p Peer) {
+	state.OnlineStatus[p.Local.IP] = IsPeerOnline(p.Local)
+	// Este método puede ser removido o reescrito si ya no es necesario
+}
+
+func GetLocalIP() string {
+	if instanciaGlobal != nil {
+		return instanciaGlobal.Local.IP
+	}
+	return ""
+}
+
+func GetPeers() []PeerInfo {
+	if instanciaGlobal != nil {
+		return instanciaGlobal.Peers
+	}
+	return nil
 }

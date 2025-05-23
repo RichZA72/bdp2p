@@ -1,34 +1,63 @@
 #!/bin/bash
 
-echo "🔧 Iniciando instalación del proyecto P2PFS..."
+echo "==============================="
+echo " Instalador del sistema BDP2P "
+echo "==============================="
 
-# 1. Verificar si Go está instalado
-if ! command -v go &> /dev/null
-then
-    echo "❌ Go no está instalado. Por favor instala Go (https://go.dev/dl/)."
+# Verificar permisos de superusuario
+if [ "$EUID" -ne 0 ]; then
+    echo "❌ Este script requiere permisos de superusuario. Ejecuta con: sudo ./instalar.sh"
     exit 1
 fi
 
-# 2. Descargar dependencias del proyecto
-echo "📦 Descargando dependencias del proyecto..."
-go mod tidy
+# Paso 1: Actualizar el sistema y herramientas esenciales
+echo "🔄 Actualizando sistema y herramientas esenciales..."
+apt update -y && apt install -y wget tar git curl build-essential
 
-# 3. Mostrar la IP local
-echo "🌐 Tu IP local es:"
-ip addr show | grep 'inet ' | grep -v 127.0.0.1 | awk '{print $2}' | cut -d/ -f1
+# Paso 2: Instalar Go (forzado)
+echo "⚙️ Forzando instalación de Go..."
 
-# 4. Verificar si existe el archivo de configuración
-if [ ! -f config/peers.json ]; then
-    echo "⚠️ No se encontró el archivo 'config/peers.json'. Se debe crear uno."
+GO_VERSION="1.22.0"
+ARCH=$(uname -m)
+
+if [ "$ARCH" = "x86_64" ]; then
+    GO_ARCH="amd64"
+elif [ "$ARCH" = "aarch64" ]; then
+    GO_ARCH="arm64"
 else
-    echo "✅ Archivo 'config/peers.json' encontrado. Recuerda editarlo con los datos de las máquinas."
+    echo "❌ Arquitectura no compatible: $ARCH"
+    exit 1
 fi
 
-# 5. Mostrar instrucciones de ejecución
-echo "🚀 Instalación completada."
-echo "ℹ️ Para ejecutar el sistema, usa:"
-echo "    go run ./cmd"
-echo "📁 Asegúrate de estar ubicado en la raíz del proyecto."
+# Eliminar instalación anterior si existe
+rm -rf /usr/local/go
 
-# 6. Aplicar permisos de ejecución automáticamente
-chmod +x instalar.sh
+# Descargar e instalar Go
+wget https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz -O /tmp/go.tar.gz
+tar -C /usr/local -xzf /tmp/go.tar.gz
+
+# Configurar PATH
+if ! grep -q "/usr/local/go/bin" ~/.bashrc; then
+    echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
+fi
+export PATH=$PATH:/usr/local/go/bin
+
+# Verificar instalación
+echo "✅ Go instalado:"
+go version || { echo "❌ Error al instalar Go"; exit 1; }
+
+# Paso 3: Mostrar IP de la máquina
+echo "------------------------------"
+echo "📡 Dirección IP local:"
+ip addr show | grep "inet " | grep -v "127.0.0.1" | awk '{print $2}' | cut -d/ -f1
+echo "------------------------------"
+
+# Paso 4: Instrucciones adicionales
+echo "📁 Edita el archivo config/peers.json para ajustar tu IP y ID."
+
+echo ""
+echo "🚀 Para ejecutar el programa desde la raíz del proyecto, usa:"
+echo "  go run ./cmd"
+echo ""
+
+echo "✅ Instalación finalizada. Reinicia la terminal si es necesario."

@@ -177,7 +177,7 @@ func Run(peerSystem *peer.Peer) {
         if !state.OnlineStatus[pinfo.IP] {
             estado = "🔴"
         }
-        label += fmt.Sprintf(" - %s:%s %s", pinfo.IP, pinfo.Port, estado)
+        label += fmt.Sprintf(" - %s:%s", pinfo.IP, pinfo.Port)
 
         title := canvas.NewText(label, color.White)
         title.TextStyle = fyne.TextStyle{Bold: true}

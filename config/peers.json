@@ -1,6 +1,6 @@
 [
   { "id": 1, "ip": "192.168.0.6", "port": "8001", "is_local": false },
   { "id": 2, "ip": "192.168.0.11", "port": "8002", "is_local": true },
-  { "id": 3, "ip": "192.168.0.7", "port": "8003", "is_local": false },
+  { "id": 3, "ip": "192.168.0.10", "port": "8003", "is_local": false },
   { "id": 4, "ip": "192.168.0.13", "port": "8004", "is_local": false }
 ]

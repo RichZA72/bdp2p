@@ -109,11 +109,23 @@ func RelayFileBetweenPeers(source peer.PeerInfo, filename string, targets []peer
 				Type:     "send",
 				FilePath: filename,
 				TargetID: target.ID,
+				SourceID: source.ID,
 			})
 			continue
 		}
+
 		connT, err := net.Dial("tcp", fmt.Sprintf("%s:%s", target.IP, target.Port))
 		if err != nil {
+			state.FileCache[target.IP] = append(state.FileCache[target.IP], state.FileInfo{
+				Name:    filename,
+				ModTime: time.Now(),
+			})
+			state.AddPendingOp(target.ID, state.PendingOperation{
+				Type:     "send",
+				FilePath: filename,
+				TargetID: target.ID,
+				SourceID: source.ID,
+			})
 			continue
 		}
 		defer connT.Close()
@@ -161,6 +173,7 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 							Type:     "send",
 							FilePath: selected.FileName,
 							TargetID: p.ID,
+							SourceID: peerSystem.Local.ID,
 						})
 						count++
 						continue

@@ -33,11 +33,12 @@ func RemoveFileFromCache(ip, filename string) {
 type PendingOperation struct {
 	Type     string // "send", "get", "delete"
 	FilePath string
-	TargetID int // ahora es int, no string
+	TargetID int    // Nodo al que va dirigida la operación
+	SourceID int    // Nodo que originó la operación
 }
 
 var (
-	pendingOps = make(map[int][]PendingOperation) // clave es int, no string
+	pendingOps = make(map[int][]PendingOperation) // clave es int
 	mutex      sync.Mutex
 )
 

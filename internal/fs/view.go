@@ -93,6 +93,7 @@ func GetRemoteFiles(ip, port string) ([]FileInfo, error) {
 }
 
 // ✅ Retorna archivos del nodo especificado
+
 func GetFilesByPeer(p peer.PeerInfo, localID int) ([]FileInfo, error) {
 	if p.ID == localID {
 		return GetLocalFiles()
@@ -100,17 +101,17 @@ func GetFilesByPeer(p peer.PeerInfo, localID int) ([]FileInfo, error) {
 
 	files, err := GetRemoteFiles(p.IP, p.Port)
 	if err != nil {
-		// Marcar como operación pendiente si está desconectado
 		state.AddPendingOp(p.ID, state.PendingOperation{
-		Type:     "get",
-		FilePath: "",     // Este campo puede quedar así si no aplica
-		TargetID: -1,     // ✅ Usa un valor dummy como -1 para indicar "no aplica"
+			Type:     "get",
+			FilePath: "",
+			TargetID: -1,
+			SourceID: localID,
 		})
-
 		return nil, err
 	}
 	return files, nil
 }
+
 
 // ✅ Compara archivos locales con los del nodo remoto y retorna los que faltan o están desactualizados
 func CompararArchivos(localFiles, remotoFiles []FileInfo) []FileInfo {

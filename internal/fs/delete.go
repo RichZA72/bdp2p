@@ -38,15 +38,17 @@ func DeleteFile(peerSystem *peer.Peer, selected SelectedFile) error {
 	}
 
 	if !state.OnlineStatus[remotePeer.IP] {
-		// ❌ Nodo desconectado → eliminación visual + registrar pendiente
-		state.RemoveFileFromCache(remotePeer.IP, selected.FileName)
-		state.AddPendingOp(remotePeer.ID, state.PendingOperation{
-			Type:     "delete",
-			FilePath: selected.FileName,
-			TargetID: remotePeer.ID,
-		})
-		return fmt.Errorf("nodo desconectado, archivo eliminado visualmente y registrado")
+	// ❌ Nodo desconectado → eliminación visual + registrar pendiente
+	state.RemoveFileFromCache(remotePeer.IP, selected.FileName)
+	state.AddPendingOp(remotePeer.ID, state.PendingOperation{
+		Type:     "delete",
+		FilePath: selected.FileName,
+		TargetID: remotePeer.ID,
+		SourceID: peerSystem.Local.ID,
+	})
+	return fmt.Errorf("nodo desconectado, archivo eliminado visualmente y registrado")
 	}
+
 
 	// 🌐 Nodo en línea → eliminación remota
 	go sendDeleteRequest(*remotePeer, selected.FileName)

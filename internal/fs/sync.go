@@ -13,23 +13,21 @@ import (
 	"p2pfs/internal/peer"
 )
 
-
 // 🆕 Aplica operaciones pendientes al reconectarse un nodo
 func ResyncAfterReconnect(peerID int) {
 	fmt.Printf("🔄 ResyncAfterReconnect: ejecutando para nodo %d\n", peerID)
 
 	ops := state.GetAndClearPendingOps(peerID)
+	peers := peer.GetPeers()
 
-	var target peer.PeerInfo
-	found := false
-	for _, p := range peer.GetPeers() {
-		if p.ID == peerID {
-			target = p
-			found = true
-			break
-		}
+	// Mapa rápido de ID a PeerInfo
+	peerMap := make(map[int]peer.PeerInfo)
+	for _, p := range peers {
+		peerMap[p.ID] = p
 	}
-	if !found {
+
+	target, ok := peerMap[peerID]
+	if !ok {
 		fmt.Printf("⚠️ Peer %d no encontrado\n", peerID)
 		return
 	}
@@ -37,15 +35,32 @@ func ResyncAfterReconnect(peerID int) {
 	for _, op := range ops {
 		switch op.Type {
 		case "send":
-			err := SendFileToPeer(target, op.FilePath)
-			if err != nil {
-				fmt.Printf("❌ Error reenviando archivo pendiente: %s → %v\n", op.FilePath, err)
+			// Si yo soy el que envía
+			if op.SourceID == -1 || op.SourceID == peer.GetPeers()[0].ID {
+				err := SendFileToPeer(target, op.FilePath)
+				if err != nil {
+					fmt.Printf("❌ Error reenviando archivo pendiente: %s → %v\n", op.FilePath, err)
+				} else {
+					fmt.Printf("📤 Archivo reenviado tras reconexión: %s\n", op.FilePath)
+				}
 			} else {
-				fmt.Printf("📤 Archivo reenviado tras reconexión: %s\n", op.FilePath)
+				origin, exists := peerMap[op.SourceID]
+				if exists {
+					fmt.Printf("📥 Solicitando archivo %s desde %s para %s (relay)\n", op.FilePath, origin.IP, target.IP)
+					err := RelayFileBetweenPeers(origin, op.FilePath, []peer.PeerInfo{target})
+					if err != nil {
+						fmt.Printf("❌ Error en relay: %v\n", err)
+					}
+				}
 			}
 		case "get":
-			requestFileFromPeer(target.IP, op.FilePath)
-			fmt.Printf("📥 Archivo solicitado tras reconexión: %s\n", op.FilePath)
+			if op.SourceID != -1 {
+				requester, exists := peerMap[op.SourceID]
+				if exists {
+					fmt.Printf("📤 Enviando archivo %s a %s que lo pidió mientras yo estaba desconectado\n", op.FilePath, requester.IP)
+					SendFileToPeer(requester, op.FilePath)
+				}
+			}
 		case "delete":
 			sendDeleteRequest(target, op.FilePath)
 			fmt.Printf("🗑️ Eliminación reenviada tras reconexión: %s\n", op.FilePath)

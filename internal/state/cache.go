@@ -1,8 +1,11 @@
 package state
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
-// FileInfo reducido para evitar importar fs (y romper ciclos)
+// FileInfo reducido para evitar importar fs
 type FileInfo struct {
 	Name    string
 	ModTime time.Time
@@ -21,4 +24,39 @@ func RemoveFileFromCache(ip, filename string) {
 		}
 	}
 	FileCache[ip] = newList
+}
+
+// ===============================
+// Operaciones pendientes por nodo
+// ===============================
+
+type PendingOperation struct {
+	Type     string // "send", "get", "delete"
+	FilePath string
+	TargetID int // ahora es int, no string
+}
+
+var (
+	pendingOps = make(map[int][]PendingOperation) // clave es int, no string
+	mutex      sync.Mutex
+)
+
+func AddPendingOp(peerID int, op PendingOperation) {
+	mutex.Lock()
+	defer mutex.Unlock()
+	pendingOps[peerID] = append(pendingOps[peerID], op)
+}
+
+func GetAndClearPendingOps(peerID int) []PendingOperation {
+	mutex.Lock()
+	defer mutex.Unlock()
+	ops := pendingOps[peerID]
+	delete(pendingOps, peerID)
+	return ops
+}
+
+func PeekPendingOps(peerID int) []PendingOperation {
+	mutex.Lock()
+	defer mutex.Unlock()
+	return pendingOps[peerID]
 }

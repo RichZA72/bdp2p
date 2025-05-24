@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"time"
-
-	"p2pfs/internal/state"
 )
 
 type PeerInfo struct {
@@ -116,10 +114,6 @@ func Start() {
 	go StartServer(p.Local.Port)
 }
 
-func ActualizarEstadoDeNodo(p Peer) {
-	state.OnlineStatus[p.Local.IP] = IsPeerOnline(p.Local)
-	// Este método puede ser removido o reescrito si ya no es necesario
-}
 
 func GetLocalIP() string {
 	if instanciaGlobal != nil {

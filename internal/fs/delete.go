@@ -1,16 +1,15 @@
 package fs
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
-	"encoding/json"
 
 	"p2pfs/internal/peer"
 	"p2pfs/internal/state"
 )
-
 
 // DeleteFile maneja eliminación local, remota o desconectada
 func DeleteFile(peerSystem *peer.Peer, selected SelectedFile) error {
@@ -39,9 +38,14 @@ func DeleteFile(peerSystem *peer.Peer, selected SelectedFile) error {
 	}
 
 	if !state.OnlineStatus[remotePeer.IP] {
-		// ❌ Nodo desconectado → eliminación visual
+		// ❌ Nodo desconectado → eliminación visual + registrar pendiente
 		state.RemoveFileFromCache(remotePeer.IP, selected.FileName)
-		return fmt.Errorf("nodo desconectado, archivo eliminado visualmente")
+		state.AddPendingOp(remotePeer.ID, state.PendingOperation{
+			Type:     "delete",
+			FilePath: selected.FileName,
+			TargetID: remotePeer.ID,
+		})
+		return fmt.Errorf("nodo desconectado, archivo eliminado visualmente y registrado")
 	}
 
 	// 🌐 Nodo en línea → eliminación remota

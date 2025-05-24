@@ -111,6 +111,7 @@ func RelayFileBetweenPeers(source peer.PeerInfo, filename string, targets []peer
 				TargetID: target.ID,
 				SourceID: source.ID,
 			})
+			peer.SendSyncLog("TRANSFER", filename, source.ID, target.ID)
 			continue
 		}
 
@@ -126,6 +127,7 @@ func RelayFileBetweenPeers(source peer.PeerInfo, filename string, targets []peer
 				TargetID: target.ID,
 				SourceID: source.ID,
 			})
+			peer.SendSyncLog("TRANSFER", filename, source.ID, target.ID)
 			continue
 		}
 		defer connT.Close()
@@ -174,6 +176,7 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 							TargetID: p.ID,
 							SourceID: peerSystem.Local.ID,
 						})
+						peer.SendSyncLog("TRANSFER", selected.FileName, localID, p.ID)
 						count++
 						continue
 					}
@@ -213,6 +216,7 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 					TargetID: target.ID,
 					SourceID: target.ID,
 				})
+				peer.SendSyncLog("TRANSFER", selected.FileName, source.ID, target.ID)
 				fmt.Printf("📩 Archivo '%s' solicitado a %s → será enviado a %s cuando se reconecte\n",
 					selected.FileName, source.IP, target.IP)
 			}

@@ -42,6 +42,7 @@ func ResyncAfterReconnect(peerID int) {
 					fmt.Printf("❌ Error reenviando archivo pendiente: %s → %v\n", op.FilePath, err)
 				} else {
 					fmt.Printf("📤 Archivo reenviado tras reconexión: %s\n", op.FilePath)
+					peer.SendSyncLog("TRANSFER", op.FilePath, peer.GetPeers()[0].ID, peerID)
 				}
 			} else {
 				origin, exists := peerMap[op.SourceID]
@@ -58,12 +59,18 @@ func ResyncAfterReconnect(peerID int) {
 				requester, exists := peerMap[op.SourceID]
 				if exists {
 					fmt.Printf("📤 Enviando archivo %s a %s que lo pidió mientras yo estaba desconectado\n", op.FilePath, requester.IP)
-					SendFileToPeer(requester, op.FilePath)
+					err := SendFileToPeer(requester, op.FilePath)
+					if err != nil {
+						fmt.Printf("❌ Error al enviar archivo tras reconexión: %v\n", err)
+					} else {
+						peer.SendSyncLog("TRANSFER", op.FilePath, peerID, requester.ID)
+					}
 				}
 			}
 		case "delete":
 			sendDeleteRequest(target, op.FilePath)
 			fmt.Printf("🗑️ Eliminación reenviada tras reconexión: %s\n", op.FilePath)
+			peer.SendSyncLog("DELETE", op.FilePath, peer.GetPeers()[0].ID, peerID)
 		default:
 			fmt.Println("⚠️ Operación desconocida:", op.Type)
 		}

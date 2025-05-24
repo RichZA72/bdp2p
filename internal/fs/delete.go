@@ -46,6 +46,8 @@ func DeleteFile(peerSystem *peer.Peer, selected SelectedFile) error {
 			TargetID: remotePeer.ID,
 			SourceID: peerSystem.Local.ID,
 		})
+		// 🔄 Notificar visualmente a los demás
+		peer.SendSyncLog("DELETE", selected.FileName, peerSystem.Local.ID, remotePeer.ID)
 		return fmt.Errorf("nodo desconectado, archivo eliminado visualmente y registrado")
 	}
 

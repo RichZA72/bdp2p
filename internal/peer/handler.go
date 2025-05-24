@@ -228,3 +228,29 @@ func requestFileFromPeer(peer PeerInfo, filename string) {
     decoded, _ := base64.StdEncoding.DecodeString(resp["content"].(string))
     os.WriteFile(filepath.Join("shared", filename), decoded, 0644)
 }
+
+func SendSyncLog(action, fileName string, originID, targetID int) {
+	log := map[string]interface{}{
+		"type": "SYNC_LOGS",
+		"logs": []map[string]interface{}{
+			{
+				"action":   action,
+				"fileName": fileName,
+				"originID": originID,
+				"targetID": targetID,
+			},
+		},
+	}
+
+	for _, peer := range Peers {
+		if peer.ID == Local.ID || peer.ID == targetID {
+			continue // No reenviar al emisor ni al receptor
+		}
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%s", peer.IP, peer.Port), 2*time.Second)
+		if err != nil {
+			continue
+		}
+		_ = json.NewEncoder(conn).Encode(log)
+		conn.Close()
+	}
+}

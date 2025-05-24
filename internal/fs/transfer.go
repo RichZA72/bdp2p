@@ -136,6 +136,7 @@ func RelayFileBetweenPeers(source peer.PeerInfo, filename string, targets []peer
 			"content": base64.StdEncoding.EncodeToString(data),
 		}
 		json.NewEncoder(connT).Encode(msg)
+		peer.SendSyncLog("TRANSFER", filename, source.ID, target.ID)
 	}
 
 	return nil
@@ -146,7 +147,6 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 	localID := peerSystem.Local.ID
 	count := 0
 
-	// Caso 1: archivo remoto → traerlo localmente si no hay destino marcado
 	if selected.PeerID != localID && !anyChecked(checkedPeers) {
 		for _, p := range peerSystem.Peers {
 			if p.ID == selected.PeerID {
@@ -156,7 +156,6 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 		return 0, fmt.Errorf("peer origen no encontrado")
 	}
 
-	// Caso 2: archivo local → enviar a nodos seleccionados
 	if selected.PeerID == localID {
 		for targetID, checked := range checkedPeers {
 			if !checked {
@@ -181,6 +180,8 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 					err := SendFileToPeer(p, selected.FileName)
 					if err != nil {
 						fmt.Printf("❌ Error al enviar a %s: %v\n", p.IP, err)
+					} else {
+						peer.SendSyncLog("TRANSFER", selected.FileName, localID, p.ID)
 					}
 					count++
 				}
@@ -189,7 +190,6 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 		return count, nil
 	}
 
-	// Caso 3: archivo remoto → reenviar a otros nodos seleccionados
 	if selected.PeerID != localID && anyChecked(checkedPeers) {
 		var source peer.PeerInfo
 		var targets []peer.PeerInfo
@@ -200,6 +200,25 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 				targets = append(targets, p)
 			}
 		}
+
+		if !state.OnlineStatus[source.IP] {
+			for _, target := range targets {
+				state.FileCache[target.IP] = append(state.FileCache[target.IP], state.FileInfo{
+					Name:    selected.FileName,
+					ModTime: time.Now(),
+				})
+				state.AddPendingOp(source.ID, state.PendingOperation{
+					Type:     "get",
+					FilePath: selected.FileName,
+					TargetID: target.ID,
+					SourceID: target.ID,
+				})
+				fmt.Printf("📩 Archivo '%s' solicitado a %s → será enviado a %s cuando se reconecte\n",
+					selected.FileName, source.IP, target.IP)
+			}
+			return len(targets), nil
+		}
+
 		err := RelayFileBetweenPeers(source, selected.FileName, targets)
 		if err != nil {
 			return 0, err
@@ -210,7 +229,6 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 	return 0, fmt.Errorf("ninguna operación de transferencia válida")
 }
 
-// anyChecked evalúa si alguna máquina fue seleccionada
 func anyChecked(m map[int]bool) bool {
 	for _, v := range m {
 		if v {

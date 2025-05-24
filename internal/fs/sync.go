@@ -9,6 +9,7 @@ import (
     "path/filepath"
     "time"
 
+    "p2pfs/internal/state"
     "p2pfs/internal/peer"
 )
 
@@ -111,4 +112,47 @@ func requestFileFromPeer(ip, filename string) {
 
     data, _ := base64.StdEncoding.DecodeString(resp["content"].(string))
     os.WriteFile(filepath.Join("shared", filename), data, 0644)
+}
+
+// SyncCallbacks contiene funciones que la GUI pasa para actualizar visualmente
+type SyncCallbacks struct {
+	UpdateStatus   func(peerID int, online bool)
+	UpdateFileList func(peerID int, files []state.FileInfo)
+}
+
+// StartAutoSync inicia la sincronización automática entre nodos
+func StartAutoSync(peerSystem *peer.Peer, localID int, callbacks SyncCallbacks) {
+	ticker := time.NewTicker(5 * time.Second)
+	go func() {
+		for range ticker.C {
+			for _, pinfo := range peerSystem.Peers {
+				files, err := GetFilesByPeer(pinfo, localID)
+				isOnline := err == nil
+				wasOnline := state.OnlineStatus[pinfo.IP]
+				state.OnlineStatus[pinfo.IP] = isOnline
+
+				if isOnline && !wasOnline && pinfo.ID == localID {
+					localFiles := state.FileCache[pinfo.IP]
+					converted := make([]FileInfo, 0, len(localFiles))
+					for _, f := range localFiles {
+						converted = append(converted, FileInfo{Name: f.Name, ModTime: f.ModTime})
+					}
+					ResyncAfterReconnect(converted)
+				}
+
+				if isOnline {
+					converted := make([]state.FileInfo, 0, len(files))
+					for _, f := range files {
+						converted = append(converted, state.FileInfo{Name: f.Name, ModTime: f.ModTime})
+					}
+					state.FileCache[pinfo.IP] = converted
+					callbacks.UpdateStatus(pinfo.ID, true)
+					callbacks.UpdateFileList(pinfo.ID, converted)
+				} else {
+					callbacks.UpdateStatus(pinfo.ID, false)
+					callbacks.UpdateFileList(pinfo.ID, state.FileCache[pinfo.IP])
+				}
+			}
+		}
+	}()
 }

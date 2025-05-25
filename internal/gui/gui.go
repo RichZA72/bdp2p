@@ -153,11 +153,31 @@ func Run(peerSystem *peer.Peer) {
 		},
 		UpdateFileList: func(peerID int, files []state.FileInfo) {
 			machineFileLists[peerID].Objects = nil
+			pending := state.GetAllPendingOps()
+			var peerOps []state.PendingOperation
+			if ops, ok := pending[peerID]; ok {
+				peerOps = ops
+			}
 			for _, file := range files {
 				name := file.Name
 				mod := file.ModTime.Format("02-Jan 15:04")
+				suffix := ""
+				for _, op := range peerOps {
+					if op.FilePath == name {
+						switch op.Type {
+						case "get":
+							suffix = " ⏳"
+						case "send":
+							suffix = " 📤"
+						case "delete":
+							suffix = " 🗑️"
+						}
+						break
+					}
+				}
+				label := fmt.Sprintf("%s (%s)%s", name, mod, suffix)
 				icon := getIconForFile(name)
-				btn := widget.NewButtonWithIcon(fmt.Sprintf("%s (%s)", name, mod), icon, nil)
+				btn := widget.NewButtonWithIcon(label, icon, nil)
 				btn.Alignment = widget.ButtonAlignLeading
 				btn.Importance = widget.MediumImportance
 				pid := peerID

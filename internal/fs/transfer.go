@@ -36,6 +36,19 @@ func SendFileToPeer(p peer.PeerInfo, filename string) error {
 
 // RequestFileFromPeer solicita un archivo desde otro nodo y lo guarda localmente
 func RequestFileFromPeer(p peer.PeerInfo, filename string) error {
+	if !state.OnlineStatus[p.IP] {
+		// Registrar solicitud como operación pendiente
+		state.AddPendingOp(p.ID, state.PendingOperation{
+			Type:     "get",
+			FilePath: filename,
+			TargetID: peer.Local.ID,
+			SourceID: p.ID,
+		})
+		peer.SendSyncLog("GET_FILE", filename, p.ID, peer.Local.ID)
+		fmt.Printf("📥 Solicitud pendiente: archivo '%s' será enviado desde %s al reconectarse\n", filename, p.IP)
+		return nil
+	}
+
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", p.IP, p.Port))
 	if err != nil {
 		return fmt.Errorf("no se pudo conectar a %s: %w", p.IP, err)
@@ -101,7 +114,6 @@ func RelayFileBetweenPeers(source peer.PeerInfo, filename string, targets []peer
 
 	for _, target := range targets {
 		if !state.OnlineStatus[target.IP] {
-			// Transferencia diferida
 			state.FileCache[target.IP] = append(state.FileCache[target.IP], state.FileInfo{
 				Name:    filename,
 				ModTime: time.Now(),
@@ -118,7 +130,6 @@ func RelayFileBetweenPeers(source peer.PeerInfo, filename string, targets []peer
 
 		connT, err := net.Dial("tcp", fmt.Sprintf("%s:%s", target.IP, target.Port))
 		if err != nil {
-			// Si falla, registrar como pendiente
 			state.FileCache[target.IP] = append(state.FileCache[target.IP], state.FileInfo{
 				Name:    filename,
 				ModTime: time.Now(),
@@ -152,7 +163,7 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 	count := 0
 
 	if selected.PeerID != localID && !anyChecked(checkedPeers) {
-		// Caso: Solicitar archivo remoto sin destino → traerlo a local
+		// Archivo remoto sin destino → traerlo a local
 		for _, p := range peerSystem.Peers {
 			if p.ID == selected.PeerID {
 				return 1, RequestFileFromPeer(p, selected.FileName)
@@ -162,7 +173,7 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 	}
 
 	if selected.PeerID == localID {
-		// Caso: Archivo local → enviar a peers seleccionados
+		// Archivo local → enviar a seleccionados
 		for targetID, checked := range checkedPeers {
 			if !checked {
 				continue
@@ -170,7 +181,6 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 			for _, p := range peerSystem.Peers {
 				if p.ID == targetID {
 					if !state.OnlineStatus[p.IP] {
-						// Transferencia diferida
 						state.FileCache[p.IP] = append(state.FileCache[p.IP], state.FileInfo{
 							Name:    selected.FileName,
 							ModTime: time.Now(),
@@ -199,7 +209,7 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 	}
 
 	if selected.PeerID != localID && anyChecked(checkedPeers) {
-		// Caso: Archivo remoto → reenviar a otros nodos
+		// Archivo remoto → reenviar a otros
 		var source peer.PeerInfo
 		var targets []peer.PeerInfo
 		for _, p := range peerSystem.Peers {
@@ -211,7 +221,6 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 		}
 
 		if !state.OnlineStatus[source.IP] {
-			// Solicitud diferida
 			for _, target := range targets {
 				state.FileCache[target.IP] = append(state.FileCache[target.IP], state.FileInfo{
 					Name:    selected.FileName,
@@ -221,7 +230,7 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 					Type:     "get",
 					FilePath: selected.FileName,
 					TargetID: target.ID,
-					SourceID: target.ID,
+					SourceID: source.ID,
 				})
 				peer.SendSyncLog("TRANSFER", selected.FileName, source.ID, target.ID)
 				fmt.Printf("📩 Archivo '%s' solicitado a %s → será reenviado a %s cuando se reconecte\n",

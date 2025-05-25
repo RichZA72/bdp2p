@@ -73,3 +73,18 @@ func PeekPendingOps(peerID int) []PendingOperation {
 	defer mutex.Unlock()
 	return pendingOps[peerID]
 }
+
+// GetAllPendingOps devuelve una copia de todas las operaciones pendientes
+func GetAllPendingOps() map[int][]PendingOperation {
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	copyMap := make(map[int][]PendingOperation)
+	for peerID, ops := range pendingOps {
+		opsCopy := make([]PendingOperation, len(ops))
+		copy(opsCopy, ops)
+		copyMap[peerID] = opsCopy
+	}
+	return copyMap
+}
+

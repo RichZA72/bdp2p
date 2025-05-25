@@ -13,7 +13,6 @@ import (
 	"p2pfs/internal/peer"
 )
 
-
 // ResyncAfterReconnect aplica operaciones pendientes a un nodo recién reconectado
 func ResyncAfterReconnect(peerID int) {
 	fmt.Printf("🔄 ResyncAfterReconnect: ejecutando para nodo %d\n", peerID)
@@ -38,7 +37,6 @@ func ResyncAfterReconnect(peerID int) {
 		switch op.Type {
 		case "send":
 			if op.SourceID == localID || op.SourceID == -1 {
-				// Enviar archivo directamente
 				err := SendFileToPeer(target, op.FilePath)
 				if err != nil {
 					fmt.Printf("❌ Error reenviando archivo: %s → %v\n", op.FilePath, err)
@@ -47,7 +45,6 @@ func ResyncAfterReconnect(peerID int) {
 					peer.SendSyncLog("TRANSFER", op.FilePath, localID, peerID)
 				}
 			} else {
-				// Relay desde otro nodo fuente
 				source, exists := peerMap[op.SourceID]
 				if exists {
 					fmt.Printf("📥 Relay: solicitar %s desde %s para %s\n", op.FilePath, source.IP, target.IP)
@@ -59,10 +56,10 @@ func ResyncAfterReconnect(peerID int) {
 			}
 
 		case "get":
-			// Nodo reconectado era quien tenía el archivo → reenviar a quien lo solicitó
-			requester, exists := peerMap[op.SourceID]
+			// Este nodo era dueño del archivo solicitado → enviar archivo a quien lo pidió
+			requester, exists := peerMap[op.TargetID]
 			if exists {
-				fmt.Printf("📤 Reenviando %s a %s tras reconexión\n", op.FilePath, requester.IP)
+				fmt.Printf("📤 Reenviando '%s' a %s tras reconexión\n", op.FilePath, requester.IP)
 				err := SendFileToPeer(requester, op.FilePath)
 				if err != nil {
 					fmt.Printf("❌ Error al enviar tras reconexión: %v\n", err)
@@ -72,7 +69,6 @@ func ResyncAfterReconnect(peerID int) {
 			}
 
 		case "delete":
-			// Solicitar eliminación
 			sendDeleteRequest(target, op.FilePath)
 			fmt.Printf("🗑️ Eliminación reenviada tras reconexión: %s\n", op.FilePath)
 			peer.SendSyncLog("DELETE", op.FilePath, localID, peerID)
@@ -82,8 +78,6 @@ func ResyncAfterReconnect(peerID int) {
 		}
 	}
 }
-
-
 
 func fileExistsLocally(name string, list []FileInfo) bool {
 	for _, f := range list {
@@ -167,7 +161,6 @@ func StartAutoSync(peerSystem *peer.Peer, localID int, callbacks SyncCallbacks) 
 				wasOnline := state.OnlineStatus[pinfo.IP]
 				state.OnlineStatus[pinfo.IP] = isOnline
 
-				// 🆕 Si se reconectó un nodo remoto → sincronizar pendientes
 				if isOnline && !wasOnline && pinfo.ID != localID {
 					ResyncAfterReconnect(pinfo.ID)
 				}

@@ -1,3 +1,4 @@
+// sync.go corregido: sincronización correcta con otros nodos
 package fs
 
 import (
@@ -137,7 +138,7 @@ func StartAutoSync(peerSystem *peer.Peer, localID int, callbacks SyncCallbacks) 
 				if pinfo.ID != localID {
 					var err error
 					var tmp []state.FileInfo
-					tmp, err = GetFilesByPeer(pinfo, localID)
+					tmp, err = requestFileListFromPeer(pinfo.IP)
 					isOnline = err == nil
 					if isOnline {
 						files = tmp
@@ -166,7 +167,6 @@ func StartAutoSync(peerSystem *peer.Peer, localID int, callbacks SyncCallbacks) 
 	}()
 }
 
-// listSharedFiles devuelve los archivos locales compartidos
 func ListSharedFiles() []state.FileInfo {
 	var files []state.FileInfo
 	_ = filepath.Walk("shared", func(path string, info os.FileInfo, err error) error {
@@ -184,20 +184,18 @@ func ListSharedFiles() []state.FileInfo {
 	return files
 }
 
-// GetLocalOrRemoteFileList es usada por la GUI para forzar sincronización inmediata
 func GetLocalOrRemoteFileList(peerSystem *peer.Peer, peerID int) ([]state.FileInfo, error) {
 	if peerID == peerSystem.Local.ID {
 		return ListSharedFiles(), nil
 	}
 	for _, p := range peerSystem.Peers {
 		if p.ID == peerID {
-			return GetFilesByPeer(p, peerSystem.Local.ID)
+			return requestFileListFromPeer(p.IP)
 		}
 	}
 	return nil, fmt.Errorf("peer %d no encontrado", peerID)
 }
 
-// Estructura para callbacks en GUI
 type SyncCallbacks struct {
 	UpdateStatus   func(peerID int, online bool)
 	UpdateFileList func(peerID int, files []state.FileInfo)

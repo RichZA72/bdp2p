@@ -199,24 +199,22 @@ func Run(peerSystem *peer.Peer) {
 		allOps := state.GetAllPendingOps()
 
 		for _, file := range files {
-			depth := strings.Count(file.Name, "/")
-			//parentDir := filepath.Dir(file.Name)
-			if depth > 0 {
-				// Mostrar si el padre está expandido
-				show := false
-				for i := 1; i <= depth; i++ {
-					ancestor := strings.Join(strings.Split(file.Name, "/")[:i], "/")
-					if expandedDirs[peerID][ancestor] {
-						show = true
-					} else {
-						show = false
-						break
-					}
-				}
-				if !show {
-					continue
-				}
-			}
+			
+depth := strings.Count(file.Name, "/")
+if depth > 0 && !file.IsDir {
+    show := true
+    pathParts := strings.Split(file.Name, "/")
+    for i := 1; i < len(pathParts); i++ {
+        ancestor := strings.Join(pathParts[:i], "/")
+        if !expandedDirs[peerID][ancestor] {
+            show = false
+            break
+        }
+    }
+    if !show {
+        continue
+    }
+}
 
 			name := filepath.Base(file.Name)
 			mod := file.ModTime.Format("02-Jan 15:04")

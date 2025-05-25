@@ -1,4 +1,4 @@
-// gui.go actualizado con navegación por carpetas funcional y sin reiniciar StartAutoSync
+// gui.go actualizado con navegación por carpetas funcional y sincronización tras transferencia
 package gui
 
 import (
@@ -80,6 +80,10 @@ func Run(peerSystem *peer.Peer) {
 		}
 	})
 
+	var fileCache = make(map[int][]state.FileInfo)
+
+	var renderFileList func(peerID int)
+
 	transferButton := widget.NewButtonWithIcon("Transferir", theme.MailForwardIcon(), func() {
 		if selectedFile == nil {
 			statusLabel.SetText("❌ Selecciona un archivo para transferir.")
@@ -94,6 +98,17 @@ func Run(peerSystem *peer.Peer) {
 			statusLabel.SetText("⚠️ " + err.Error())
 		} else {
 			statusLabel.SetText(fmt.Sprintf("📤 Archivo enviado a %d máquina(s).", n))
+
+			// ✅ Actualización forzada tras la transferencia
+			for _, p := range peerSystem.Peers {
+				if p.ID == localID || checked[p.ID] {
+					go func(pid int) {
+						files, _ := fs.GetLocalOrRemoteFileList(peerSystem, pid)
+						fileCache[pid] = files
+						renderFileList(pid)
+					}(p.ID)
+				}
+			}
 		}
 	})
 
@@ -144,10 +159,6 @@ func Run(peerSystem *peer.Peer) {
 		machinePanels[pinfo.ID] = panel
 		grid.Add(panel)
 	}
-
-	var fileCache = make(map[int][]state.FileInfo)
-
-	var renderFileList func(peerID int)
 
 	fs.StartAutoSync(peerSystem, localID, fs.SyncCallbacks{
 		UpdateStatus: func(peerID int, online bool) {

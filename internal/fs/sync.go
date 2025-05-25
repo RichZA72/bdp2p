@@ -41,25 +41,27 @@ func ResyncAfterReconnect(peerID int) {
 				continue
 			}
 
-			filePath := filepath.Join("shared", op.FilePath)
-			if _, err := os.Stat(filePath); err == nil {
-				err := SendFileToPeer(targetPeer, op.FilePath)
+			relPath := filepath.Clean(op.FilePath)
+			localFile := filepath.Join("shared", relPath)
+
+			if _, err := os.Stat(localFile); err == nil {
+				err := SendFileToPeer(targetPeer, relPath)
 				if err != nil {
-					fmt.Printf("❌ Error al enviar '%s' a nodo %d: %v\n", op.FilePath, op.TargetID, err)
+					fmt.Printf("❌ Error al enviar '%s' a nodo %d: %v\n", relPath, op.TargetID, err)
 				} else {
-					fmt.Printf("📤 '%s' reenviado tras reconexión\n", op.FilePath)
-					peer.SendSyncLog("TRANSFER", op.FilePath, peerID, op.TargetID)
+					fmt.Printf("📤 '%s' reenviado tras reconexión\n", relPath)
+					peer.SendSyncLog("TRANSFER", relPath, peerID, op.TargetID)
 				}
 			} else if localID == op.SourceID {
 				sourcePeer := peerMap[op.SourceID]
-				err := RelayFileBetweenPeers(sourcePeer, op.FilePath, []peer.PeerInfo{targetPeer})
+				err := RelayFileBetweenPeers(sourcePeer, relPath, []peer.PeerInfo{targetPeer})
 				if err != nil {
-					fmt.Printf("❌ Relay fallido para '%s': %v\n", op.FilePath, err)
+					fmt.Printf("❌ Relay fallido para '%s': %v\n", relPath, err)
 				} else {
-					fmt.Printf("📥 Relay de '%s' realizado a %d\n", op.FilePath, op.TargetID)
+					fmt.Printf("📥 Relay de '%s' realizado a %d\n", relPath, op.TargetID)
 				}
 			} else {
-				fmt.Printf("⚠️ Archivo '%s' no encontrado localmente y no soy SourceID\n", op.FilePath)
+				fmt.Printf("⚠️ Archivo '%s' no disponible y no soy SourceID\n", relPath)
 			}
 
 		case "delete":
@@ -123,11 +125,7 @@ func requestFileFromPeer(ip, filename string) {
 	os.WriteFile(path, data, 0644)
 }
 
-type SyncCallbacks struct {
-	UpdateStatus   func(peerID int, online bool)
-	UpdateFileList func(peerID int, files []state.FileInfo)
-}
-
+// StartAutoSync sincroniza periódicamente con los peers
 func StartAutoSync(peerSystem *peer.Peer, localID int, callbacks SyncCallbacks) {
 	ticker := time.NewTicker(5 * time.Second)
 	go func() {
@@ -142,7 +140,7 @@ func StartAutoSync(peerSystem *peer.Peer, localID int, callbacks SyncCallbacks) 
 					tmp, err = GetFilesByPeer(pinfo, localID)
 					isOnline = err == nil
 					if isOnline {
-						files = tmp // ✅ No se necesita conversión si tmp es del tipo correcto
+						files = tmp
 					}
 				} else {
 					files = listSharedFiles()
@@ -168,6 +166,7 @@ func StartAutoSync(peerSystem *peer.Peer, localID int, callbacks SyncCallbacks) 
 	}()
 }
 
+// listSharedFiles devuelve los archivos locales compartidos
 func listSharedFiles() []state.FileInfo {
 	var files []state.FileInfo
 	_ = filepath.Walk("shared", func(path string, info os.FileInfo, err error) error {
@@ -185,3 +184,21 @@ func listSharedFiles() []state.FileInfo {
 	return files
 }
 
+// GetLocalOrRemoteFileList es usada por la GUI para forzar sincronización inmediata
+func GetLocalOrRemoteFileList(peerSystem *peer.Peer, peerID int) ([]state.FileInfo, error) {
+	if peerID == peerSystem.Local.ID {
+		return listSharedFiles(), nil
+	}
+	for _, p := range peerSystem.Peers {
+		if p.ID == peerID {
+			return GetFilesByPeer(p, peerSystem.Local.ID)
+		}
+	}
+	return nil, fmt.Errorf("peer %d no encontrado", peerID)
+}
+
+// Estructura para callbacks en GUI
+type SyncCallbacks struct {
+	UpdateStatus   func(peerID int, online bool)
+	UpdateFileList func(peerID int, files []state.FileInfo)
+}

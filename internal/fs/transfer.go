@@ -14,13 +14,13 @@ import (
 	"p2pfs/internal/state"
 )
 
-// SendFileToPeer envía un archivo local a otro nodo
 // SendFileToPeer envía un archivo o carpeta local a otro nodo
 func SendFileToPeer(p peer.PeerInfo, filename string) error {
-	filePath := filepath.Join("shared", filename)
+	cleanPath := filepath.Clean(filename)
+	filePath := filepath.Join("shared", cleanPath)
 	info, err := os.Stat(filePath)
 	if err != nil {
-		return fmt.Errorf("no se pudo acceder a %s: %w", filename, err)
+		return fmt.Errorf("no se pudo acceder a %s: %w", cleanPath, err)
 	}
 
 	if info.IsDir() {
@@ -33,16 +33,16 @@ func SendFileToPeer(p peer.PeerInfo, filename string) error {
 
 		msg := map[string]interface{}{
 			"type":    "SEND_FILE",
-			"name":    filename,
-			"content": "",        // sin contenido
-			"isDir":   true,      // marcar como carpeta
+			"name":    cleanPath,
+			"content": "",
+			"isDir":   true,
 		}
 		if err := json.NewEncoder(conn).Encode(msg); err != nil {
 			return fmt.Errorf("no se pudo enviar la carpeta: %w", err)
 		}
 
 		// Ahora enviar los archivos internos
-		return sendDirectoryRecursively(p, filename)
+		return sendDirectoryRecursively(p, cleanPath)
 	}
 
 	// Es un archivo normal
@@ -59,15 +59,12 @@ func SendFileToPeer(p peer.PeerInfo, filename string) error {
 
 	msg := map[string]interface{}{
 		"type":    "SEND_FILE",
-		"name":    filename,
+		"name":    cleanPath,
 		"content": base64.StdEncoding.EncodeToString(data),
-		"isDir":   false,  // marcar como archivo
+		"isDir":   false,
 	}
 	return json.NewEncoder(conn).Encode(msg)
 }
-
-
-
 
 // sendDirectoryRecursively envía todos los archivos dentro de una carpeta
 func sendDirectoryRecursively(p peer.PeerInfo, root string) error {
@@ -102,8 +99,6 @@ func sendDirectoryRecursively(p peer.PeerInfo, root string) error {
 		return SendFileToPeer(p, relPath)
 	})
 }
-
-
 
 // RequestFileFromPeer solicita un archivo desde otro nodo y lo guarda localmente
 func RequestFileFromPeer(p peer.PeerInfo, filename string) error {
@@ -151,18 +146,19 @@ func RequestFileFromPeer(p peer.PeerInfo, filename string) error {
 
 // RelayFileBetweenPeers reenvía una carpeta o archivo desde un nodo fuente a múltiples destinos
 func RelayFileBetweenPeers(source peer.PeerInfo, filename string, targets []peer.PeerInfo) error {
+	filename = filepath.Clean(filename)
+
 	isDir := strings.HasSuffix(filename, "/") || filepath.Ext(filename) == ""
 	if isDir {
-		// Solicitar lista de archivos recursivos desde carpeta remota
-			files, err := requestRemoteFileList(source, filename)
-			if err != nil {
-				return fmt.Errorf("no se pudo obtener lista de archivos de %s: %w", filename, err)
-			}
-			for _, f := range files {
-				rel := f.Name
-				RelayFileBetweenPeers(source, rel, targets)
-			}
-			return nil
+		files, err := requestRemoteFileList(source, filename)
+		if err != nil {
+			return fmt.Errorf("no se pudo obtener lista de archivos de %s: %w", filename, err)
+		}
+		for _, f := range files {
+			rel := f.Name
+			RelayFileBetweenPeers(source, rel, targets)
+		}
+		return nil
 	}
 
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", source.IP, source.Port))
@@ -283,7 +279,6 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 	count := 0
 
 	if selected.PeerID != localID && !anyChecked(checkedPeers) {
-		// Descargar archivo de otro nodo a local
 		for _, p := range peerSystem.Peers {
 			if p.ID == selected.PeerID {
 				return 1, RequestFileFromPeer(p, selected.FileName)
@@ -293,7 +288,6 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 	}
 
 	if selected.PeerID == localID {
-		// Subir archivo/carpeta local a otras máquinas
 		for targetID, checked := range checkedPeers {
 			if !checked {
 				continue
@@ -302,20 +296,18 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 				if p.ID == targetID {
 					err := SendFileToPeer(p, selected.FileName)
 					if err != nil {
-						// Si está desconectado, registrar como pendiente
 						path := filepath.Join("shared", selected.FileName)
 						info, err := os.Stat(path)
 						isDir := false
 						if err == nil {
-						isDir = info.IsDir()
-}
+							isDir = info.IsDir()
+						}
 
-state.FileCache[p.IP] = append(state.FileCache[p.IP], state.FileInfo{
-	Name:    selected.FileName,
-	ModTime: time.Now(),
-	IsDir:   isDir,
-})
-						
+						state.FileCache[p.IP] = append(state.FileCache[p.IP], state.FileInfo{
+							Name:    selected.FileName,
+							ModTime: time.Now(),
+							IsDir:   isDir,
+						})
 
 						state.AddPendingOp(p.ID, state.PendingOperation{
 							Type:     "send",
@@ -335,7 +327,6 @@ state.FileCache[p.IP] = append(state.FileCache[p.IP], state.FileInfo{
 	}
 
 	if selected.PeerID != localID && anyChecked(checkedPeers) {
-		// Reenviar archivo/carpeta de otro nodo a otros
 		var source peer.PeerInfo
 		var targets []peer.PeerInfo
 		for _, p := range peerSystem.Peers {
@@ -360,4 +351,3 @@ func anyChecked(m map[int]bool) bool {
 	}
 	return false
 }
-

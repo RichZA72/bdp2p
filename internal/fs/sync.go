@@ -1,4 +1,3 @@
-// sync.go corregido: sincronización correcta con otros nodos
 package fs
 
 import (
@@ -76,8 +75,8 @@ func ResyncAfterReconnect(peerID int) {
 	}
 }
 
-func requestFileListFromPeer(ip string) ([]state.FileInfo, error) {
-	conn, err := net.DialTimeout("tcp", ip+":9000", 2*time.Second)
+func requestFileListFromPeer(address string) ([]state.FileInfo, error) {
+	conn, err := net.DialTimeout("tcp", address, 2*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -137,12 +136,9 @@ func StartAutoSync(peerSystem *peer.Peer, localID int, callbacks SyncCallbacks) 
 
 				if pinfo.ID != localID {
 					var err error
-					var tmp []state.FileInfo
-					tmp, err = requestFileListFromPeer(pinfo.IP)
+					address := fmt.Sprintf("%s:%s", pinfo.IP, pinfo.Port)
+					files, err = requestFileListFromPeer(address)
 					isOnline = err == nil
-					if isOnline {
-						files = tmp
-					}
 				} else {
 					files = ListSharedFiles()
 				}
@@ -190,7 +186,7 @@ func GetLocalOrRemoteFileList(peerSystem *peer.Peer, peerID int) ([]state.FileIn
 	}
 	for _, p := range peerSystem.Peers {
 		if p.ID == peerID {
-			return requestFileListFromPeer(p.IP)
+			return requestFileListFromPeer(fmt.Sprintf("%s:%s", p.IP, p.Port))
 		}
 	}
 	return nil, fmt.Errorf("peer %d no encontrado", peerID)

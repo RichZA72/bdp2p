@@ -57,11 +57,6 @@ func handleConnection(conn net.Conn) {
 		if ok {
 			handleDeleteFile(conn, name)
 		}
-	case "DELETE_DIR":
-		name, ok := request["name"].(string)
-		if ok {
-			handleDeleteDir(conn, name)
-		}
 	case "SYNC_LOGS":
 		handleSyncLogs(request)
 	default:
@@ -159,28 +154,28 @@ func handleReceiveFile(request map[string]interface{}) {
 }
 
 func handleDeleteFile(conn net.Conn, name string) {
-	err := os.Remove(filepath.Join("shared", name))
-	status := "ok"
-	if err != nil {
-		fmt.Println("❌ Error al eliminar archivo:", err)
-		status = "error"
-	}
-	resp := map[string]interface{}{
-		"type":   "DELETE_ACK",
-		"status": status,
-	}
-	_ = json.NewEncoder(conn).Encode(resp)
-}
+	path := filepath.Join("shared", name)
+	info, err := os.Stat(path)
 
-func handleDeleteDir(conn net.Conn, name string) {
-	err := os.RemoveAll(filepath.Join("shared", name))
 	status := "ok"
+
 	if err != nil {
-		fmt.Println("❌ Error al eliminar carpeta:", err)
+		fmt.Println("❌ No se pudo acceder a", name, ":", err)
 		status = "error"
 	} else {
-		fmt.Println("🗑️ Carpeta eliminada:", name)
+		if info.IsDir() {
+			err = os.RemoveAll(path)
+		} else {
+			err = os.Remove(path)
+		}
+		if err != nil {
+			fmt.Println("❌ Error al eliminar", name, ":", err)
+			status = "error"
+		} else {
+			fmt.Println("🗑️ Eliminado:", name)
+		}
 	}
+
 	resp := map[string]interface{}{
 		"type":   "DELETE_ACK",
 		"status": status,

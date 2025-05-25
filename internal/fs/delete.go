@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"p2pfs/internal/peer"
 	"p2pfs/internal/state"
@@ -23,19 +22,20 @@ func DeleteFile(peerSystem *peer.Peer, selected SelectedFile) error {
 		if err != nil {
 			return fmt.Errorf("no se encontró el archivo o carpeta: %w", err)
 		}
+		var delErr error
 		if info.IsDir() {
-			err = os.RemoveAll(path)
+			delErr = os.RemoveAll(path)
 		} else {
-			err = os.Remove(path)
+			delErr = os.Remove(path)
 		}
-		if err != nil {
-			return fmt.Errorf("error al eliminar localmente: %w", err)
+		if delErr != nil {
+			return fmt.Errorf("error al eliminar localmente: %w", delErr)
 		}
 		peer.SendSyncLog("DELETE", selected.FileName, localID, localID)
 		return nil
 	}
 
-	// Buscar información del nodo remoto
+	// 🌐 Eliminación remota o diferida
 	var remotePeer *peer.PeerInfo
 	for _, p := range peerSystem.Peers {
 		if p.ID == selected.PeerID {
@@ -48,7 +48,7 @@ func DeleteFile(peerSystem *peer.Peer, selected SelectedFile) error {
 	}
 
 	if !state.OnlineStatus[remotePeer.IP] {
-		// ❌ Nodo desconectado → eliminación visual y registro como pendiente
+		// Nodo desconectado → eliminar visualmente y registrar como pendiente
 		state.RemoveFileFromCache(remotePeer.IP, selected.FileName)
 		state.AddPendingOp(remotePeer.ID, state.PendingOperation{
 			Type:     "delete",
@@ -60,51 +60,26 @@ func DeleteFile(peerSystem *peer.Peer, selected SelectedFile) error {
 		return fmt.Errorf("nodo desconectado, eliminación registrada como pendiente")
 	}
 
-	// 🌐 Nodo conectado → enviar solicitud de eliminación (archivo o carpeta)
+	// Nodo conectado → enviar solicitud de eliminación
 	go func() {
-		if isDirPath(selected.FileName) {
-			sendDeleteDirRequest(*remotePeer, selected.FileName)
-		} else {
-			sendDeleteRequest(*remotePeer, selected.FileName)
-		}
+		sendDeleteRequest(*remotePeer, selected.FileName)
 		peer.SendSyncLog("DELETE", selected.FileName, localID, remotePeer.ID)
 	}()
 	return nil
 }
 
-// isDirPath intenta inferir si es carpeta (heurística simple)
-func isDirPath(name string) bool {
-	return !strings.Contains(filepath.Base(name), ".")
-}
-
-// sendDeleteRequest envía un mensaje DELETE_FILE a un nodo remoto por TCP
-func sendDeleteRequest(p peer.PeerInfo, filename string) {
+// sendDeleteRequest envía DELETE_FILE a un nodo remoto, que debe decidir si es archivo o carpeta
+func sendDeleteRequest(p peer.PeerInfo, path string) {
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", p.IP, p.Port))
 	if err != nil {
-		fmt.Println("❌ No se pudo conectar para eliminar archivo:", err)
+		fmt.Println("❌ No se pudo conectar para eliminar:", err)
 		return
 	}
 	defer conn.Close()
 
 	msg := map[string]string{
 		"type": "DELETE_FILE",
-		"name": filename,
-	}
-	json.NewEncoder(conn).Encode(msg)
-}
-
-// sendDeleteDirRequest envía un mensaje DELETE_DIR a un nodo remoto por TCP
-func sendDeleteDirRequest(p peer.PeerInfo, dirname string) {
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", p.IP, p.Port))
-	if err != nil {
-		fmt.Println("❌ No se pudo conectar para eliminar carpeta:", err)
-		return
-	}
-	defer conn.Close()
-
-	msg := map[string]string{
-		"type": "DELETE_DIR",
-		"name": dirname,
+		"name": path,
 	}
 	json.NewEncoder(conn).Encode(msg)
 }

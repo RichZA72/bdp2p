@@ -73,14 +73,30 @@ func GetRemoteFiles(ip, port string) ([]state.FileInfo, error) {
 		}
 
 		for _, item := range rawFiles {
-			f := item.(map[string]interface{})
-			modTime, _ := time.Parse(time.RFC3339, f["modTime"].(string))
-			isDir, _ := f["isDir"].(bool)
-			result = append(result, state.FileInfo{
-				Name:    f["name"].(string),
-				ModTime: modTime,
-				IsDir:   isDir,
-			})
+			f, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			// Extracción segura de campos
+			name, nameOK := f["name"].(string)
+			modStr, modOK := f["modTime"].(string)
+			isDir, _ := f["isDir"].(bool) // por defecto false
+
+			modTime := time.Now()
+			if modOK {
+				if parsed, err := time.Parse(time.RFC3339, modStr); err == nil {
+					modTime = parsed
+				}
+			}
+
+			if nameOK {
+				result = append(result, state.FileInfo{
+					Name:    name,
+					ModTime: modTime,
+					IsDir:   isDir,
+				})
+			}
 		}
 	}
 

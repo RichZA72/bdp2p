@@ -12,11 +12,9 @@ import (
 	"p2pfs/internal/state"
 )
 
-// Variables globales asignadas externamente
 var Local PeerInfo
 var Peers []PeerInfo
 
-// StartServer inicia el servidor TCP en el puerto indicado
 func StartServer(port string) {
 	listener, err := net.Listen("tcp", ":"+port)
 	if err != nil {
@@ -35,7 +33,6 @@ func StartServer(port string) {
 	}
 }
 
-// handleConnection gestiona los mensajes entrantes
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
 
@@ -48,37 +45,29 @@ func handleConnection(conn net.Conn) {
 	switch t := request["type"].(string); t {
 	case "GET_FILES":
 		handleGetFiles(conn)
-
 	case "GET_FILE":
 		name, ok := request["name"].(string)
 		if ok {
 			handleSendFile(conn, name)
 		}
-
 	case "SEND_FILE":
 		handleReceiveFile(request)
-
 	case "DELETE_FILE":
 		name, ok := request["name"].(string)
 		if ok {
 			handleDeleteFile(conn, name)
 		}
-
 	case "DELETE_DIR":
 		name, ok := request["name"].(string)
 		if ok {
 			handleDeleteDir(conn, name)
 		}
-
 	case "SYNC_LOGS":
 		handleSyncLogs(request)
-
 	default:
 		fmt.Println("⚠️ Tipo de mensaje desconocido:", request["type"])
 	}
 }
-
-// --- HANDLERS ---
 
 func handleGetFiles(conn net.Conn) {
 	files, err := getLocalFiles()
@@ -86,6 +75,7 @@ func handleGetFiles(conn net.Conn) {
 		fmt.Println("❌ No se pudieron listar archivos:", err)
 		return
 	}
+	fmt.Println("📦 Enviando lista de archivos:", len(files))
 	resp := map[string]interface{}{
 		"type":  "FILES_LIST",
 		"files": files,
@@ -95,6 +85,23 @@ func handleGetFiles(conn net.Conn) {
 
 func handleSendFile(conn net.Conn, name string) {
 	path := filepath.Join("shared", name)
+	info, err := os.Stat(path)
+	if err != nil {
+		fmt.Println("❌ No se pudo acceder al archivo:", err)
+		return
+	}
+
+	if info.IsDir() {
+		resp := map[string]interface{}{
+			"type":  "SEND_FILE",
+			"name":  name,
+			"isDir": true,
+		}
+		_ = json.NewEncoder(conn).Encode(resp)
+		fmt.Println("📁 Enviando carpeta vacía:", name)
+		return
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Println("❌ No se pudo leer el archivo:", err)
@@ -102,32 +109,32 @@ func handleSendFile(conn net.Conn, name string) {
 	}
 
 	resp := map[string]interface{}{
-		"type":    "FILE_CONTENT",
+		"type":    "SEND_FILE",
 		"name":    name,
 		"content": base64.StdEncoding.EncodeToString(data),
+		"isDir":   false,
 	}
 	_ = json.NewEncoder(conn).Encode(resp)
 }
 
-
 func handleReceiveFile(request map[string]interface{}) {
 	name, ok1 := request["name"].(string)
 	content, ok2 := request["content"].(string)
-	isDir, _ := request["isDir"].(bool) // por defecto false si no viene
-
-	if !ok1 || !ok2 {
-		fmt.Println("❌ Formato inválido en archivo recibido")
-		return
-	}
+	isDir, _ := request["isDir"].(bool)
 
 	path := filepath.Join("shared", name)
 
 	if isDir {
 		if err := os.MkdirAll(path, 0755); err != nil {
 			fmt.Println("❌ Error al crear carpeta recibida:", err)
-			return
+		} else {
+			fmt.Println("📁 Carpeta recibida:", name)
 		}
-		fmt.Println("📁 Carpeta recibida:", name)
+		return
+	}
+
+	if !ok1 || !ok2 {
+		fmt.Println("❌ Formato inválido en archivo recibido")
 		return
 	}
 
@@ -150,8 +157,6 @@ func handleReceiveFile(request map[string]interface{}) {
 
 	fmt.Println("📥 Archivo recibido y guardado:", name)
 }
-
-
 
 func handleDeleteFile(conn net.Conn, name string) {
 	err := os.Remove(filepath.Join("shared", name))
@@ -188,10 +193,7 @@ func getLocalFiles() ([]state.FileInfo, error) {
 	dir := "shared"
 
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if path == dir {
+		if err != nil || path == dir {
 			return nil
 		}
 		rel, _ := filepath.Rel(dir, path)
@@ -234,7 +236,6 @@ func handleSyncLogs(request map[string]interface{}) {
 		case "DELETE":
 			_ = os.RemoveAll(filepath.Join("shared", fileName))
 			fmt.Println("🗑️ Eliminado por log:", fileName)
-
 		case "TRANSFER":
 			for _, peer := range Peers {
 				if peer.ID == originID {
@@ -242,7 +243,6 @@ func handleSyncLogs(request map[string]interface{}) {
 					break
 				}
 			}
-
 		default:
 			fmt.Println("⚠️ Acción no reconocida:", action)
 		}
@@ -265,8 +265,12 @@ func requestFileFromPeer(peer PeerInfo, filename string) {
 
 	var resp map[string]interface{}
 	err = json.NewDecoder(conn).Decode(&resp)
-	if err != nil || resp["type"] != "FILE_CONTENT" {
+	if err != nil {
 		fmt.Println("❌ Error al recibir archivo:", err)
+		return
+	}
+
+	if resp["type"] != "FILE_CONTENT" {
 		return
 	}
 

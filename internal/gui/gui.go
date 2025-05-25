@@ -1,4 +1,4 @@
-// Código limpio y refactorizado de gui.go
+// gui.go actualizado con navegación por carpetas funcional y sin reiniciar StartAutoSync
 package gui
 
 import (
@@ -39,6 +39,7 @@ func Run(peerSystem *peer.Peer) {
 	machinePanels := make(map[int]*fyne.Container)
 	machineStates := make(map[int]*widget.Label)
 	machineFileLists := make(map[int]*fyne.Container)
+	expandedDirs := make(map[int]map[string]bool)
 
 	scroll := container.NewVScroll(grid)
 	scroll.SetMinSize(fyne.NewSize(1000, 600))
@@ -130,6 +131,7 @@ func Run(peerSystem *peer.Peer) {
 		machineStates[pinfo.ID] = stateLbl
 		fileList := container.NewVBox()
 		machineFileLists[pinfo.ID] = fileList
+		expandedDirs[pinfo.ID] = make(map[string]bool)
 
 		content := container.NewVBox(title, stateLbl, widget.NewSeparator(), fileList)
 		border := canvas.NewRectangle(colors[i%len(colors)])
@@ -143,6 +145,10 @@ func Run(peerSystem *peer.Peer) {
 		grid.Add(panel)
 	}
 
+	var fileCache = make(map[int][]state.FileInfo)
+
+	var renderFileList func(peerID int)
+
 	fs.StartAutoSync(peerSystem, localID, fs.SyncCallbacks{
 		UpdateStatus: func(peerID int, online bool) {
 			if online {
@@ -152,18 +158,29 @@ func Run(peerSystem *peer.Peer) {
 			}
 		},
 		UpdateFileList: func(peerID int, files []state.FileInfo) {
-			machineFileLists[peerID].Objects = nil
-			pending := state.GetAllPendingOps()
-			var peerOps []state.PendingOperation
-			if ops, ok := pending[peerID]; ok {
-				peerOps = ops
+			fileCache[peerID] = files
+			renderFileList(peerID)
+		},
+	})
+
+	renderFileList = func(peerID int) {
+		files := fileCache[peerID]
+		machineFileLists[peerID].Objects = nil
+		allOps := state.GetAllPendingOps()
+
+		for _, file := range files {
+			parent := filepath.Dir(file.Name)
+			depth := strings.Count(file.Name, "/")
+			if depth > 0 && !expandedDirs[peerID][parent] {
+				continue
 			}
-			for _, file := range files {
-				name := file.Name
-				mod := file.ModTime.Format("02-Jan 15:04")
-				suffix := ""
-				for _, op := range peerOps {
-					if op.FilePath == name {
+
+			name := filepath.Base(file.Name)
+			mod := file.ModTime.Format("02-Jan 15:04")
+			suffix := ""
+			for _, ops := range allOps {
+				for _, op := range ops {
+					if op.TargetID == peerID && op.FilePath == file.Name {
 						switch op.Type {
 						case "get":
 							suffix = " ⏳"
@@ -175,36 +192,65 @@ func Run(peerSystem *peer.Peer) {
 						break
 					}
 				}
-				label := fmt.Sprintf("%s (%s)%s", name, mod, suffix)
-				icon := getIconForFile(name)
-				btn := widget.NewButtonWithIcon(label, icon, nil)
-				btn.Alignment = widget.ButtonAlignLeading
-				btn.Importance = widget.MediumImportance
-				pid := peerID
-				fname := name
-				thisBtn := btn
-				var lastClick time.Time
-				btn.OnTapped = func() {
-					now := time.Now()
-					if selectedButton != nil {
-						(*selectedButton).Importance = widget.MediumImportance
-						(*selectedButton).Refresh()
-					}
-					selectedFile = &fs.SelectedFile{FileName: fname, PeerID: pid}
-					selectedButton = thisBtn
-					thisBtn.Importance = widget.HighImportance
-					thisBtn.Refresh()
-					selectedLabel.SetText("Archivo seleccionado: " + fname + " (Maq" + strconv.Itoa(pid) + ")")
-					if pid == localID && now.Sub(lastClick) < 500*time.Millisecond {
-						go openFile(fname)
-					}
-					lastClick = now
-				}
-				machineFileLists[peerID].Add(btn)
 			}
-			machineFileLists[peerID].Refresh()
-		},
-	})
+
+			indent := strings.Repeat("   ", depth)
+			label := fmt.Sprintf("%s%s (%s)%s", indent, name, mod, suffix)
+			icon := getIconForFile(name, file.IsDir)
+
+			btn := widget.NewButtonWithIcon(label, icon, nil)
+			btn.Alignment = widget.ButtonAlignLeading
+			btn.Importance = widget.MediumImportance
+
+			pid := peerID
+			fname := file.Name
+			thisBtn := btn
+			var lastClick time.Time
+
+			var arrow *widget.Button
+			if file.IsDir {
+				expanded := expandedDirs[pid][fname]
+				arrow = widget.NewButton("▸", nil)
+				if expanded {
+					arrow.SetText("▼")
+				}
+				arrow.OnTapped = func() {
+					expandedDirs[pid][fname] = !expandedDirs[pid][fname]
+					renderFileList(pid)
+				}
+			}
+
+			btn.OnTapped = func() {
+				now := time.Now()
+				if selectedButton != nil {
+					selectedButton.Importance = widget.MediumImportance
+					selectedButton.Refresh()
+				}
+				selectedFile = &fs.SelectedFile{FileName: fname, PeerID: pid}
+				selectedButton = thisBtn
+				thisBtn.Importance = widget.HighImportance
+				thisBtn.Refresh()
+				selectedLabel.SetText("Archivo seleccionado: " + name + " (Maq" + strconv.Itoa(pid) + ")")
+
+				if file.IsDir && now.Sub(lastClick) < 500*time.Millisecond {
+					expandedDirs[pid][fname] = !expandedDirs[pid][fname]
+					renderFileList(pid)
+				}
+				if pid == localID && now.Sub(lastClick) < 500*time.Millisecond && !file.IsDir {
+					go openFile(fname)
+				}
+				lastClick = now
+			}
+
+			row := container.NewHBox()
+			if arrow != nil {
+				row.Add(arrow)
+			}
+			row.Add(btn)
+			machineFileLists[peerID].Add(row)
+		}
+		machineFileLists[peerID].Refresh()
+	}
 
 	myApp.Run()
 }
@@ -212,7 +258,6 @@ func Run(peerSystem *peer.Peer) {
 func openFile(name string) {
 	fullPath := filepath.Join("shared", name)
 	var cmd *exec.Cmd
-
 	switch runtime.GOOS {
 	case "linux":
 		cmd = exec.Command("xdg-open", fullPath)
@@ -224,7 +269,10 @@ func openFile(name string) {
 	_ = cmd.Start()
 }
 
-func getIconForFile(name string) fyne.Resource {
+func getIconForFile(name string, isDir bool) fyne.Resource {
+	if isDir {
+		return theme.FolderIcon()
+	}
 	ext := strings.ToLower(filepath.Ext(name))
 	switch ext {
 	case ".txt":

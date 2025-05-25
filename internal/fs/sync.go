@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"p2pfs/internal/state"
 	"p2pfs/internal/peer"
+	"p2pfs/internal/state"
 )
 
 // ResyncAfterReconnect aplica operaciones pendientes a un nodo recién reconectado
@@ -21,7 +21,6 @@ func ResyncAfterReconnect(peerID int) {
 	peers := peer.GetPeers()
 	localID := peer.Local.ID
 
-	// Mapa de ID a PeerInfo
 	peerMap := make(map[int]peer.PeerInfo)
 	for _, p := range peers {
 		peerMap[p.ID] = p
@@ -35,37 +34,32 @@ func ResyncAfterReconnect(peerID int) {
 
 	for _, op := range ops {
 		switch op.Type {
-		case "send":
-			if op.SourceID == localID || op.SourceID == -1 {
-				err := SendFileToPeer(target, op.FilePath)
-				if err != nil {
-					fmt.Printf("❌ Error reenviando archivo: %s → %v\n", op.FilePath, err)
-				} else {
-					fmt.Printf("📤 Archivo reenviado tras reconexión: %s\n", op.FilePath)
-					peer.SendSyncLog("TRANSFER", op.FilePath, localID, peerID)
-				}
-			} else {
-				source, exists := peerMap[op.SourceID]
-				if exists {
-					fmt.Printf("📥 Relay: solicitar %s desde %s para %s\n", op.FilePath, source.IP, target.IP)
-					err := RelayFileBetweenPeers(source, op.FilePath, []peer.PeerInfo{target})
-					if err != nil {
-						fmt.Printf("❌ Error en relay: %v\n", err)
-					}
-				}
+		case "send", "get":
+			targetPeer, exists := peerMap[op.TargetID]
+			if !exists {
+				fmt.Printf("⚠️ Nodo destino %d no encontrado\n", op.TargetID)
+				continue
 			}
 
-		case "get":
-			// Este nodo era dueño del archivo solicitado → enviar archivo a quien lo pidió
-			requester, exists := peerMap[op.TargetID]
-			if exists {
-				fmt.Printf("📤 Reenviando '%s' a %s tras reconexión\n", op.FilePath, requester.IP)
-				err := SendFileToPeer(requester, op.FilePath)
+			filePath := filepath.Join("shared", op.FilePath)
+			if _, err := os.Stat(filePath); err == nil {
+				err := SendFileToPeer(targetPeer, op.FilePath)
 				if err != nil {
-					fmt.Printf("❌ Error al enviar tras reconexión: %v\n", err)
+					fmt.Printf("❌ Error al enviar '%s' a nodo %d: %v\n", op.FilePath, op.TargetID, err)
 				} else {
-					peer.SendSyncLog("TRANSFER", op.FilePath, peerID, requester.ID)
+					fmt.Printf("📤 '%s' reenviado tras reconexión\n", op.FilePath)
+					peer.SendSyncLog("TRANSFER", op.FilePath, peerID, op.TargetID)
 				}
+			} else if localID == op.SourceID {
+				sourcePeer := peerMap[op.SourceID]
+				err := RelayFileBetweenPeers(sourcePeer, op.FilePath, []peer.PeerInfo{targetPeer})
+				if err != nil {
+					fmt.Printf("❌ Relay fallido para '%s': %v\n", op.FilePath, err)
+				} else {
+					fmt.Printf("📥 Relay de '%s' realizado a %d\n", op.FilePath, op.TargetID)
+				}
+			} else {
+				fmt.Printf("⚠️ Archivo '%s' no encontrado localmente y no soy SourceID\n", op.FilePath)
 			}
 
 		case "delete":
@@ -79,25 +73,7 @@ func ResyncAfterReconnect(peerID int) {
 	}
 }
 
-func fileExistsLocally(name string, list []FileInfo) bool {
-	for _, f := range list {
-		if f.Name == name {
-			return true
-		}
-	}
-	return false
-}
-
-func fileInList(name string, list []FileInfo) bool {
-	for _, f := range list {
-		if f.Name == name {
-			return true
-		}
-	}
-	return false
-}
-
-func requestFileListFromPeer(ip string) ([]FileInfo, error) {
+func requestFileListFromPeer(ip string) ([]state.FileInfo, error) {
 	conn, err := net.DialTimeout("tcp", ip+":9000", 2*time.Second)
 	if err != nil {
 		return nil, err
@@ -118,7 +94,7 @@ func requestFileListFromPeer(ip string) ([]FileInfo, error) {
 	}
 
 	rawList, _ := json.Marshal(resp["files"])
-	var files []FileInfo
+	var files []state.FileInfo
 	json.Unmarshal(rawList, &files)
 	return files, nil
 }
@@ -141,23 +117,44 @@ func requestFileFromPeer(ip, filename string) {
 	}
 
 	data, _ := base64.StdEncoding.DecodeString(resp["content"].(string))
-	os.WriteFile(filepath.Join("shared", filename), data, 0644)
+	path := filepath.Join("shared", filename)
+	os.MkdirAll(filepath.Dir(path), 0755)
+	os.WriteFile(path, data, 0644)
 }
 
-// SyncCallbacks contiene funciones que la GUI pasa para actualizar visualmente
 type SyncCallbacks struct {
 	UpdateStatus   func(peerID int, online bool)
 	UpdateFileList func(peerID int, files []state.FileInfo)
 }
 
-// StartAutoSync inicia la sincronización automática entre nodos
 func StartAutoSync(peerSystem *peer.Peer, localID int, callbacks SyncCallbacks) {
 	ticker := time.NewTicker(5 * time.Second)
 	go func() {
 		for range ticker.C {
 			for _, pinfo := range peerSystem.Peers {
-				files, err := GetFilesByPeer(pinfo, localID)
-				isOnline := err == nil
+				var files []state.FileInfo
+				isOnline := true
+				
+				if pinfo.ID != localID {
+	var err error
+	tmp, err := GetFilesByPeer(pinfo, localID)
+	isOnline = err == nil
+	if isOnline {
+		files = make([]state.FileInfo, len(tmp))
+		for i, f := range tmp {
+			files[i] = state.FileInfo{
+				Name:    f.Name,
+				ModTime: f.ModTime,
+				IsDir:   false, // ✅ Aquí asigna false o crea conversión si es posible
+			}
+		}
+	}
+} else {
+	files = listSharedFiles()
+}
+			
+
+
 				wasOnline := state.OnlineStatus[pinfo.IP]
 				state.OnlineStatus[pinfo.IP] = isOnline
 
@@ -166,13 +163,9 @@ func StartAutoSync(peerSystem *peer.Peer, localID int, callbacks SyncCallbacks) 
 				}
 
 				if isOnline {
-					converted := make([]state.FileInfo, 0, len(files))
-					for _, f := range files {
-						converted = append(converted, state.FileInfo{Name: f.Name, ModTime: f.ModTime})
-					}
-					state.FileCache[pinfo.IP] = converted
+					state.FileCache[pinfo.IP] = files
 					callbacks.UpdateStatus(pinfo.ID, true)
-					callbacks.UpdateFileList(pinfo.ID, converted)
+					callbacks.UpdateFileList(pinfo.ID, files)
 				} else {
 					callbacks.UpdateStatus(pinfo.ID, false)
 					callbacks.UpdateFileList(pinfo.ID, state.FileCache[pinfo.IP])
@@ -180,4 +173,21 @@ func StartAutoSync(peerSystem *peer.Peer, localID int, callbacks SyncCallbacks) 
 			}
 		}
 	}()
+}
+
+func listSharedFiles() []state.FileInfo {
+	var files []state.FileInfo
+	_ = filepath.Walk("shared", func(path string, info os.FileInfo, err error) error {
+		if err != nil || path == "shared" {
+			return nil
+		}
+		rel, _ := filepath.Rel("shared", path)
+		files = append(files, state.FileInfo{
+			Name:    rel,
+			ModTime: info.ModTime(),
+			IsDir:   info.IsDir(),
+		})
+		return nil
+	})
+	return files
 }

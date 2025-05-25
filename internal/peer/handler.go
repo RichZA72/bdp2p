@@ -17,6 +17,7 @@ var Peers []PeerInfo
 type FileInfo struct {
 	Name    string    `json:"name"`
 	ModTime time.Time `json:"modTime"`
+	IsDir   bool      `json:"isDir"` // ← Agregado
 }
 
 // StartServer inicia el servidor TCP en el puerto indicado
@@ -67,6 +68,12 @@ func handleConnection(conn net.Conn) {
 			handleDeleteFile(conn, name)
 		}
 
+	case "DELETE_DIR":
+		name, ok := request["name"].(string)
+		if ok {
+			handleDeleteDir(conn, name)
+		}
+
 	case "SYNC_LOGS":
 		handleSyncLogs(request)
 
@@ -114,13 +121,19 @@ func handleReceiveFile(request map[string]interface{}) {
 		return
 	}
 
+	path := filepath.Join("shared", name)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		fmt.Println("❌ Error al crear carpeta destino:", err)
+		return
+	}
+
 	data, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		fmt.Println("❌ Error al decodificar archivo:", err)
 		return
 	}
 
-	err = os.WriteFile(filepath.Join("shared", name), data, 0644)
+	err = os.WriteFile(path, data, 0644)
 	if err != nil {
 		fmt.Println("❌ Error al guardar archivo recibido:", err)
 		return
@@ -143,32 +156,46 @@ func handleDeleteFile(conn net.Conn, name string) {
 	_ = json.NewEncoder(conn).Encode(resp)
 }
 
-// getLocalFiles devuelve los archivos disponibles en el nodo local
+func handleDeleteDir(conn net.Conn, name string) {
+	err := os.RemoveAll(filepath.Join("shared", name))
+	status := "ok"
+	if err != nil {
+		fmt.Println("❌ Error al eliminar carpeta:", err)
+		status = "error"
+	} else {
+		fmt.Println("🗑️ Carpeta eliminada:", name)
+	}
+	resp := map[string]interface{}{
+		"type":   "DELETE_ACK",
+		"status": status,
+	}
+	_ = json.NewEncoder(conn).Encode(resp)
+}
+
 func getLocalFiles() ([]FileInfo, error) {
 	var files []FileInfo
 	dir := "shared"
 
-	entries, err := os.ReadDir(dir)
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if path == dir {
+			return nil
+		}
+		rel, _ := filepath.Rel(dir, path)
+		files = append(files, FileInfo{
+		Name: rel, 
+		ModTime: info.ModTime(), 
+		IsDir:info.IsDir(), })
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			info, err := entry.Info()
-			if err != nil {
-				continue
-			}
-			files = append(files, FileInfo{
-				Name:    entry.Name(),
-				ModTime: info.ModTime(),
-			})
-		}
 	}
 	return files, nil
 }
 
-// handleSyncLogs aplica los cambios enviados en los logs si son dirigidos a esta máquina
 func handleSyncLogs(request map[string]interface{}) {
 	rawLogs, ok := request["logs"].([]interface{})
 	if !ok {
@@ -187,19 +214,14 @@ func handleSyncLogs(request map[string]interface{}) {
 		originID := int(entry["originID"].(float64))
 		targetID := int(entry["targetID"].(float64))
 
-		// Solo aplicar si el destino soy yo
 		if targetID != Local.ID {
 			continue
 		}
 
 		switch action {
 		case "DELETE":
-			err := os.Remove(filepath.Join("shared", fileName))
-			if err == nil {
-				fmt.Println("🗑️ Archivo eliminado por log:", fileName)
-			} else {
-				fmt.Println("⚠️ No se pudo eliminar (puede que ya no exista):", fileName)
-			}
+			_ = os.RemoveAll(filepath.Join("shared", fileName))
+			fmt.Println("🗑️ Eliminado por log:", fileName)
 
 		case "TRANSFER":
 			for _, peer := range Peers {
@@ -215,7 +237,6 @@ func handleSyncLogs(request map[string]interface{}) {
 	}
 }
 
-// requestFileFromPeer solicita un archivo a otro nodo y lo guarda localmente
 func requestFileFromPeer(peer PeerInfo, filename string) {
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", peer.IP, peer.Port))
 	if err != nil {
@@ -238,10 +259,13 @@ func requestFileFromPeer(peer PeerInfo, filename string) {
 	}
 
 	decoded, _ := base64.StdEncoding.DecodeString(resp["content"].(string))
-	os.WriteFile(filepath.Join("shared", filename), decoded, 0644)
+	if err := os.MkdirAll(filepath.Dir(filepath.Join("shared", filename)), 0755); err != nil {
+		fmt.Println("❌ Error creando carpeta para archivo recibido:", err)
+		return
+	}
+	_ = os.WriteFile(filepath.Join("shared", filename), decoded, 0644)
 }
 
-// SendSyncLog envía una operación a los demás nodos como log de sincronización
 func SendSyncLog(action, fileName string, originID, targetID int) {
 	log := map[string]interface{}{
 		"type": "SYNC_LOGS",

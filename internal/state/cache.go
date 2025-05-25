@@ -13,6 +13,7 @@ import (
 type FileInfo struct {
 	Name    string
 	ModTime time.Time
+	IsDir   bool // ← nuevo campo para indicar si es carpeta
 }
 
 // FileCache guarda la lista de archivos por IP de nodo

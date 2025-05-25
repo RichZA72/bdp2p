@@ -84,41 +84,57 @@ func Run(peerSystem *peer.Peer) {
 
 	var renderFileList func(peerID int)
 
+	
+
 	transferButton := widget.NewButtonWithIcon("Transferir", theme.MailForwardIcon(), func() {
-		if selectedFile == nil {
-			statusLabel.SetText("❌ Selecciona un archivo para transferir.")
-			return
-		}
-		checked := make(map[int]bool)
-		for id, chk := range peerCheckMap {
-			checked[id] = chk.Checked
-		}
-		
-		n, err := fs.TransferFile(peerSystem, *selectedFile, checked)
-if err != nil {
-	statusLabel.SetText("⚠️ " + err.Error())
-} else {
-	statusLabel.SetText(fmt.Sprintf("📤 Archivo enviado a %d máquina(s).", n))
+	if selectedFile == nil {
+		statusLabel.SetText("❌ Selecciona un archivo para transferir.")
+		return
+	}
 
-	// ✅ Forzar actualización inmediata del panel local y destinos
-	go func() {
-		// Actualizar local
-		localFiles := fs.ListSharedFiles()
-		fileCache[localID] = localFiles
-		renderFileList(localID)
+	// Leer checkboxes seleccionados
+	checked := make(map[int]bool)
+	for id, chk := range peerCheckMap {
+		checked[id] = chk.Checked
+	}
 
-		// Actualizar nodos destino marcados
-		for id, ok := range checked {
-			if ok {
-				files, _ := fs.GetLocalOrRemoteFileList(peerSystem, id)
-				fileCache[id] = files
-				renderFileList(id)
+	// Realizar transferencia
+	n, err := fs.TransferFile(peerSystem, *selectedFile, checked)
+	if err != nil {
+		statusLabel.SetText("⚠️ " + err.Error())
+	} else {
+		statusLabel.SetText(fmt.Sprintf("📤 Archivo enviado a %d máquina(s).", n))
+
+		// ✅ Actualizar todas las vistas tras transferencia
+		go func() {
+			// 🔄 1. Refrescar máquina local
+			localFiles := fs.ListSharedFiles()
+			fileCache[localID] = localFiles
+			renderFileList(localID)
+
+			// 🔄 2. Refrescar máquinas destino
+			for id, ok := range checked {
+				if ok {
+					files, _ := fs.GetLocalOrRemoteFileList(peerSystem, id)
+					fileCache[id] = files
+					renderFileList(id)
+				}
 			}
-		}
-	}()
-}
 
-	})
+			// 🔄 3. Refrescar también máquinas que no participaron (actualización global)
+			for _, p := range peerSystem.Peers {
+				if p.ID != localID && !checked[p.ID] {
+					files, _ := fs.GetLocalOrRemoteFileList(peerSystem, p.ID)
+					fileCache[p.ID] = files
+					renderFileList(p.ID)
+				}
+			}
+		}()
+	}
+})
+	
+
+
 
 	header := container.NewVBox(
 		canvas.NewText("Sistema Distribuido P2P", theme.ForegroundColor()),
@@ -245,7 +261,9 @@ if err != nil {
 					selectedButton.Importance = widget.MediumImportance
 					selectedButton.Refresh()
 				}
-				selectedFile = &fs.SelectedFile{FileName: fname, PeerID: pid}
+				clean := strings.TrimPrefix(fname, "shared/")
+				selectedFile = &fs.SelectedFile{FileName: clean, PeerID: pid}
+
 				selectedButton = thisBtn
 				thisBtn.Importance = widget.HighImportance
 				thisBtn.Refresh()

@@ -1,4 +1,4 @@
-// gui.go actualizado con navegación por carpetas funcional, sincronización tras transferencia y mejoras visuales
+// gui.go corregido: visualización de archivos remotos en subdirectorios
 package gui
 
 import (
@@ -110,7 +110,6 @@ func Run(peerSystem *peer.Peer) {
 					if ok {
 						files, _ := fs.GetLocalOrRemoteFileList(peerSystem, id)
 						fileCache[id] = files
-						// Expandimos carpeta padre si existe
 						if len(selectedFile.FileName) > 0 {
 							parent := filepath.Dir(selectedFile.FileName)
 							if parent != "." {
@@ -199,16 +198,24 @@ func Run(peerSystem *peer.Peer) {
 		machineFileLists[peerID].Objects = nil
 		allOps := state.GetAllPendingOps()
 
-		fmt.Printf("📂 Maq%d - Archivos recibidos:\n", peerID)
-		for _, f := range files {
-			fmt.Println(" -", f.Name)
-		}
-
 		for _, file := range files {
-			parent := filepath.Dir(file.Name)
 			depth := strings.Count(file.Name, "/")
-			if depth > 0 && !expandedDirs[peerID][parent] {
-				continue
+			//parentDir := filepath.Dir(file.Name)
+			if depth > 0 {
+				// Mostrar si el padre está expandido
+				show := false
+				for i := 1; i <= depth; i++ {
+					ancestor := strings.Join(strings.Split(file.Name, "/")[:i], "/")
+					if expandedDirs[peerID][ancestor] {
+						show = true
+					} else {
+						show = false
+						break
+					}
+				}
+				if !show {
+					continue
+				}
 			}
 
 			name := filepath.Base(file.Name)
@@ -264,7 +271,6 @@ func Run(peerSystem *peer.Peer) {
 				}
 				clean := strings.TrimPrefix(fname, "shared/")
 				selectedFile = &fs.SelectedFile{FileName: clean, PeerID: pid}
-				fmt.Println("📂 Archivo seleccionado:", fname)
 				selectedButton = thisBtn
 				thisBtn.Importance = widget.HighImportance
 				thisBtn.Refresh()

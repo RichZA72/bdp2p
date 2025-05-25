@@ -15,6 +15,7 @@ import (
 )
 
 // SendFileToPeer envía un archivo local a otro nodo
+// SendFileToPeer envía un archivo o carpeta local a otro nodo
 func SendFileToPeer(p peer.PeerInfo, filename string) error {
 	filePath := filepath.Join("shared", filename)
 	info, err := os.Stat(filePath)
@@ -23,9 +24,28 @@ func SendFileToPeer(p peer.PeerInfo, filename string) error {
 	}
 
 	if info.IsDir() {
+		// Enviar primero la carpeta vacía
+		conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", p.IP, p.Port))
+		if err != nil {
+			return fmt.Errorf("no se pudo conectar a %s: %w", p.IP, err)
+		}
+		defer conn.Close()
+
+		msg := map[string]interface{}{
+			"type":    "SEND_FILE",
+			"name":    filename,
+			"content": "",        // sin contenido
+			"isDir":   true,      // marcar como carpeta
+		}
+		if err := json.NewEncoder(conn).Encode(msg); err != nil {
+			return fmt.Errorf("no se pudo enviar la carpeta: %w", err)
+		}
+
+		// Ahora enviar los archivos internos
 		return sendDirectoryRecursively(p, filename)
 	}
 
+	// Es un archivo normal
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", p.IP, p.Port))
 	if err != nil {
 		return fmt.Errorf("no se pudo conectar a %s: %w", p.IP, err)
@@ -41,20 +61,49 @@ func SendFileToPeer(p peer.PeerInfo, filename string) error {
 		"type":    "SEND_FILE",
 		"name":    filename,
 		"content": base64.StdEncoding.EncodeToString(data),
+		"isDir":   false,  // marcar como archivo
 	}
 	return json.NewEncoder(conn).Encode(msg)
 }
 
+
+
+
 // sendDirectoryRecursively envía todos los archivos dentro de una carpeta
 func sendDirectoryRecursively(p peer.PeerInfo, root string) error {
-	return filepath.Walk(filepath.Join("shared", root), func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+	rootPath := filepath.Join("shared", root)
+	return filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
 			return nil
 		}
+		if info.IsDir() {
+			return nil
+		}
+
 		relPath, _ := filepath.Rel("shared", path)
+
+		if !state.OnlineStatus[p.IP] {
+			state.FileCache[p.IP] = append(state.FileCache[p.IP], state.FileInfo{
+				Name:    relPath,
+				ModTime: info.ModTime(),
+				IsDir:   false,
+			})
+			state.AddPendingOp(p.ID, state.PendingOperation{
+				Type:     "send",
+				FilePath: relPath,
+				TargetID: p.ID,
+				SourceID: peer.Local.ID,
+			})
+			peer.SendSyncLog("TRANSFER", relPath, peer.Local.ID, p.ID)
+			fmt.Printf("📦 Pendiente: %s para %s\n", relPath, p.IP)
+			return nil
+		}
+
 		return SendFileToPeer(p, relPath)
 	})
 }
+
+
 
 // RequestFileFromPeer solicita un archivo desde otro nodo y lo guarda localmente
 func RequestFileFromPeer(p peer.PeerInfo, filename string) error {
@@ -254,10 +303,20 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 					err := SendFileToPeer(p, selected.FileName)
 					if err != nil {
 						// Si está desconectado, registrar como pendiente
-						state.FileCache[p.IP] = append(state.FileCache[p.IP], state.FileInfo{
-							Name:    selected.FileName,
-							ModTime: time.Now(),
-						})
+						path := filepath.Join("shared", selected.FileName)
+						info, err := os.Stat(path)
+						isDir := false
+						if err == nil {
+						isDir = info.IsDir()
+}
+
+state.FileCache[p.IP] = append(state.FileCache[p.IP], state.FileInfo{
+	Name:    selected.FileName,
+	ModTime: time.Now(),
+	IsDir:   isDir,
+})
+						
+
 						state.AddPendingOp(p.ID, state.PendingOperation{
 							Type:     "send",
 							FilePath: selected.FileName,

@@ -8,17 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"p2pfs/internal/state"
 )
 
 // Variables globales asignadas externamente
 var Local PeerInfo
 var Peers []PeerInfo
-
-type FileInfo struct {
-	Name    string    `json:"name"`
-	ModTime time.Time `json:"modTime"`
-	IsDir   bool      `json:"isDir"` // ← Agregado
-}
 
 // StartServer inicia el servidor TCP en el puerto indicado
 func StartServer(port string) {
@@ -113,21 +109,34 @@ func handleSendFile(conn net.Conn, name string) {
 	_ = json.NewEncoder(conn).Encode(resp)
 }
 
+
 func handleReceiveFile(request map[string]interface{}) {
 	name, ok1 := request["name"].(string)
-	encoded, ok2 := request["content"].(string)
+	content, ok2 := request["content"].(string)
+	isDir, _ := request["isDir"].(bool) // por defecto false si no viene
+
 	if !ok1 || !ok2 {
 		fmt.Println("❌ Formato inválido en archivo recibido")
 		return
 	}
 
 	path := filepath.Join("shared", name)
+
+	if isDir {
+		if err := os.MkdirAll(path, 0755); err != nil {
+			fmt.Println("❌ Error al crear carpeta recibida:", err)
+			return
+		}
+		fmt.Println("📁 Carpeta recibida:", name)
+		return
+	}
+
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		fmt.Println("❌ Error al crear carpeta destino:", err)
 		return
 	}
 
-	data, err := base64.StdEncoding.DecodeString(encoded)
+	data, err := base64.StdEncoding.DecodeString(content)
 	if err != nil {
 		fmt.Println("❌ Error al decodificar archivo:", err)
 		return
@@ -141,6 +150,8 @@ func handleReceiveFile(request map[string]interface{}) {
 
 	fmt.Println("📥 Archivo recibido y guardado:", name)
 }
+
+
 
 func handleDeleteFile(conn net.Conn, name string) {
 	err := os.Remove(filepath.Join("shared", name))
@@ -172,8 +183,8 @@ func handleDeleteDir(conn net.Conn, name string) {
 	_ = json.NewEncoder(conn).Encode(resp)
 }
 
-func getLocalFiles() ([]FileInfo, error) {
-	var files []FileInfo
+func getLocalFiles() ([]state.FileInfo, error) {
+	var files []state.FileInfo
 	dir := "shared"
 
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
@@ -184,10 +195,11 @@ func getLocalFiles() ([]FileInfo, error) {
 			return nil
 		}
 		rel, _ := filepath.Rel(dir, path)
-		files = append(files, FileInfo{
-		Name: rel, 
-		ModTime: info.ModTime(), 
-		IsDir:info.IsDir(), })
+		files = append(files, state.FileInfo{
+			Name:    rel,
+			ModTime: info.ModTime(),
+			IsDir:   info.IsDir(),
+		})
 		return nil
 	})
 	if err != nil {

@@ -11,14 +11,9 @@ import (
 	"p2pfs/internal/state"
 )
 
-type FileInfo struct {
-	Name    string    `json:"name"`
-	ModTime time.Time `json:"modTime"`
-}
-
 // ✅ Obtiene archivos locales del directorio "shared"
-func GetLocalFiles() ([]FileInfo, error) {
-	var files []FileInfo
+func GetLocalFiles() ([]state.FileInfo, error) {
+	var files []state.FileInfo
 	dir := "shared"
 
 	entries, err := os.ReadDir(dir)
@@ -27,26 +22,24 @@ func GetLocalFiles() ([]FileInfo, error) {
 	}
 
 	for _, entry := range entries {
-		if !entry.IsDir() {
-			info, err := entry.Info()
-			if err != nil {
-				continue
-			}
-			files = append(files, FileInfo{
-				Name:    entry.Name(),
-				ModTime: info.ModTime(),
-			})
+		info, err := entry.Info()
+		if err != nil {
+			continue
 		}
+		files = append(files, state.FileInfo{
+			Name:    entry.Name(),
+			ModTime: info.ModTime(),
+			IsDir:   entry.IsDir(),
+		})
 	}
 	return files, nil
 }
 
 // ✅ Solicita archivos a un nodo remoto
-func GetRemoteFiles(ip, port string) ([]FileInfo, error) {
+func GetRemoteFiles(ip, port string) ([]state.FileInfo, error) {
 	address := fmt.Sprintf("%s:%s", ip, port)
 	conn, err := net.DialTimeout("tcp", address, 2*time.Second)
 	if err != nil {
-		// Si falla la conexión, marcamos como desconectado y retornamos error
 		state.OnlineStatus[ip] = false
 		return nil, fmt.Errorf("nodo %s desconectado", ip)
 	}
@@ -64,7 +57,7 @@ func GetRemoteFiles(ip, port string) ([]FileInfo, error) {
 		return nil, err
 	}
 
-	var result []FileInfo
+	var result []state.FileInfo
 
 	if response["type"] == "FILES_LIST" {
 		raw, ok := response["files"]
@@ -82,9 +75,11 @@ func GetRemoteFiles(ip, port string) ([]FileInfo, error) {
 		for _, item := range rawFiles {
 			f := item.(map[string]interface{})
 			modTime, _ := time.Parse(time.RFC3339, f["modTime"].(string))
-			result = append(result, FileInfo{
+			isDir, _ := f["isDir"].(bool)
+			result = append(result, state.FileInfo{
 				Name:    f["name"].(string),
 				ModTime: modTime,
+				IsDir:   isDir,
 			})
 		}
 	}
@@ -93,8 +88,7 @@ func GetRemoteFiles(ip, port string) ([]FileInfo, error) {
 }
 
 // ✅ Retorna archivos del nodo especificado
-
-func GetFilesByPeer(p peer.PeerInfo, localID int) ([]FileInfo, error) {
+func GetFilesByPeer(p peer.PeerInfo, localID int) ([]state.FileInfo, error) {
 	if p.ID == localID {
 		return GetLocalFiles()
 	}
@@ -112,10 +106,9 @@ func GetFilesByPeer(p peer.PeerInfo, localID int) ([]FileInfo, error) {
 	return files, nil
 }
 
-
 // ✅ Compara archivos locales con los del nodo remoto y retorna los que faltan o están desactualizados
-func CompararArchivos(localFiles, remotoFiles []FileInfo) []FileInfo {
-	var faltantes []FileInfo
+func CompararArchivos(localFiles, remotoFiles []state.FileInfo) []state.FileInfo {
+	var faltantes []state.FileInfo
 	remotoMap := make(map[string]time.Time)
 
 	for _, rf := range remotoFiles {

@@ -111,7 +111,8 @@ func requestFileFromPeer(ip, filename string) {
 	json.NewEncoder(conn).Encode(req)
 
 	var resp map[string]interface{}
-	if err := json.NewDecoder(conn).Decode(&resp); err != nil || resp["type"] != "FILE_CONTENT" {
+	err = json.NewDecoder(conn).Decode(&resp)
+	if err != nil || resp["type"] != "FILE_CONTENT" {
 		fmt.Println("❌ Error al recibir archivo:", err)
 		return
 	}
@@ -134,26 +135,18 @@ func StartAutoSync(peerSystem *peer.Peer, localID int, callbacks SyncCallbacks) 
 			for _, pinfo := range peerSystem.Peers {
 				var files []state.FileInfo
 				isOnline := true
-				
-				if pinfo.ID != localID {
-	var err error
-	tmp, err := GetFilesByPeer(pinfo, localID)
-	isOnline = err == nil
-	if isOnline {
-		files = make([]state.FileInfo, len(tmp))
-		for i, f := range tmp {
-			files[i] = state.FileInfo{
-				Name:    f.Name,
-				ModTime: f.ModTime,
-				IsDir:   false, // ✅ Aquí asigna false o crea conversión si es posible
-			}
-		}
-	}
-} else {
-	files = listSharedFiles()
-}
-			
 
+				if pinfo.ID != localID {
+					var err error
+					var tmp []state.FileInfo
+					tmp, err = GetFilesByPeer(pinfo, localID)
+					isOnline = err == nil
+					if isOnline {
+						files = tmp // ✅ No se necesita conversión si tmp es del tipo correcto
+					}
+				} else {
+					files = listSharedFiles()
+				}
 
 				wasOnline := state.OnlineStatus[pinfo.IP]
 				state.OnlineStatus[pinfo.IP] = isOnline
@@ -191,3 +184,4 @@ func listSharedFiles() []state.FileInfo {
 	})
 	return files
 }
+

@@ -1,4 +1,4 @@
-// gui.go actualizado con navegación por carpetas funcional y sincronización tras transferencia
+// gui.go actualizado con navegación por carpetas funcional, sincronización tras transferencia y mejoras visuales
 package gui
 
 import (
@@ -84,57 +84,53 @@ func Run(peerSystem *peer.Peer) {
 
 	var renderFileList func(peerID int)
 
-	
-
 	transferButton := widget.NewButtonWithIcon("Transferir", theme.MailForwardIcon(), func() {
-	if selectedFile == nil {
-		statusLabel.SetText("❌ Selecciona un archivo para transferir.")
-		return
-	}
+		if selectedFile == nil {
+			statusLabel.SetText("❌ Selecciona un archivo para transferir.")
+			return
+		}
 
-	// Leer checkboxes seleccionados
-	checked := make(map[int]bool)
-	for id, chk := range peerCheckMap {
-		checked[id] = chk.Checked
-	}
+		checked := make(map[int]bool)
+		for id, chk := range peerCheckMap {
+			checked[id] = chk.Checked
+		}
 
-	// Realizar transferencia
-	n, err := fs.TransferFile(peerSystem, *selectedFile, checked)
-	if err != nil {
-		statusLabel.SetText("⚠️ " + err.Error())
-	} else {
-		statusLabel.SetText(fmt.Sprintf("📤 Archivo enviado a %d máquina(s).", n))
+		n, err := fs.TransferFile(peerSystem, *selectedFile, checked)
+		if err != nil {
+			statusLabel.SetText("⚠️ " + err.Error())
+		} else {
+			statusLabel.SetText(fmt.Sprintf("📤 Archivo enviado a %d máquina(s).", n))
 
-		// ✅ Actualizar todas las vistas tras transferencia
-		go func() {
-			// 🔄 1. Refrescar máquina local
-			localFiles := fs.ListSharedFiles()
-			fileCache[localID] = localFiles
-			renderFileList(localID)
+			go func() {
+				localFiles := fs.ListSharedFiles()
+				fileCache[localID] = localFiles
+				renderFileList(localID)
 
-			// 🔄 2. Refrescar máquinas destino
-			for id, ok := range checked {
-				if ok {
-					files, _ := fs.GetLocalOrRemoteFileList(peerSystem, id)
-					fileCache[id] = files
-					renderFileList(id)
+				for id, ok := range checked {
+					if ok {
+						files, _ := fs.GetLocalOrRemoteFileList(peerSystem, id)
+						fileCache[id] = files
+						// Expandimos carpeta padre si existe
+						if len(selectedFile.FileName) > 0 {
+							parent := filepath.Dir(selectedFile.FileName)
+							if parent != "." {
+								expandedDirs[id][parent] = true
+							}
+						}
+						renderFileList(id)
+					}
 				}
-			}
 
-			// 🔄 3. Refrescar también máquinas que no participaron (actualización global)
-			for _, p := range peerSystem.Peers {
-				if p.ID != localID && !checked[p.ID] {
-					files, _ := fs.GetLocalOrRemoteFileList(peerSystem, p.ID)
-					fileCache[p.ID] = files
-					renderFileList(p.ID)
+				for _, p := range peerSystem.Peers {
+					if p.ID != localID && !checked[p.ID] {
+						files, _ := fs.GetLocalOrRemoteFileList(peerSystem, p.ID)
+						fileCache[p.ID] = files
+						renderFileList(p.ID)
+					}
 				}
-			}
-		}()
-	}
-})
-	
-
-
+			}()
+		}
+	})
 
 	header := container.NewVBox(
 		canvas.NewText("Sistema Distribuido P2P", theme.ForegroundColor()),
@@ -202,6 +198,11 @@ func Run(peerSystem *peer.Peer) {
 		files := fileCache[peerID]
 		machineFileLists[peerID].Objects = nil
 		allOps := state.GetAllPendingOps()
+
+		fmt.Printf("📂 Maq%d - Archivos recibidos:\n", peerID)
+		for _, f := range files {
+			fmt.Println(" -", f.Name)
+		}
 
 		for _, file := range files {
 			parent := filepath.Dir(file.Name)

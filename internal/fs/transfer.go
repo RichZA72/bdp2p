@@ -71,6 +71,29 @@ func SendFileToPeer(p peer.PeerInfo, filename string) error {
 	return json.NewEncoder(conn).Encode(msg)
 }
 
+// sendSingleFile envía únicamente un archivo, sin validaciones adicionales
+func sendSingleFile(p peer.PeerInfo, relPath string) error {
+	filePath := filepath.Join("shared", relPath)
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("no se pudo leer %s: %w", relPath, err)
+	}
+
+	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", p.IP, p.Port))
+	if err != nil {
+		return fmt.Errorf("no se pudo conectar a %s: %w", p.IP, err)
+	}
+	defer conn.Close()
+
+	msg := map[string]interface{}{
+		"type":    "SEND_FILE",
+		"name":    relPath,
+		"content": base64.StdEncoding.EncodeToString(data),
+		"isDir":   false,
+	}
+	return json.NewEncoder(conn).Encode(msg)
+}
+
 
 // sendDirectoryRecursively envía todos los archivos dentro de una carpeta
 func sendDirectoryRecursively(p peer.PeerInfo, root string) error {
@@ -102,7 +125,7 @@ func sendDirectoryRecursively(p peer.PeerInfo, root string) error {
 			return nil
 		}
 
-		return SendFileToPeer(p, relPath)
+		return sendSingleFile(p, relPath)
 	})
 }
 

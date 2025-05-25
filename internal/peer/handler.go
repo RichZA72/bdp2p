@@ -79,37 +79,46 @@ func handleGetFiles(conn net.Conn) {
 }
 
 func handleSendFile(conn net.Conn, name string) {
-	path := filepath.Join("shared", name)
+	path := filepath.Join("shared", filepath.Clean(name))
 	info, err := os.Stat(path)
 	if err != nil {
-		fmt.Println("❌ No se pudo acceder al archivo:", err)
+		fmt.Printf("❌ No se pudo acceder al archivo '%s': %v\n", path, err)
+		resp := map[string]interface{}{
+			"type":  "ERROR",
+			"error": fmt.Sprintf("Archivo no accesible: %v", err),
+		}
+		_ = json.NewEncoder(conn).Encode(resp)
 		return
 	}
 
 	if info.IsDir() {
 		resp := map[string]interface{}{
-			"type":  "SEND_FILE",
-			"name":  name,
-			"isDir": true,
+			"type":  "ERROR",
+			"error": "No se puede enviar una carpeta como archivo",
 		}
 		_ = json.NewEncoder(conn).Encode(resp)
-		fmt.Println("📁 Enviando carpeta vacía:", name)
+		fmt.Println("⚠️ Se intentó enviar un directorio como archivo:", name)
 		return
 	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		fmt.Println("❌ No se pudo leer el archivo:", err)
+		fmt.Printf("❌ Error al leer el archivo '%s': %v\n", path, err)
+		resp := map[string]interface{}{
+			"type":  "ERROR",
+			"error": fmt.Sprintf("Lectura fallida: %v", err),
+		}
+		_ = json.NewEncoder(conn).Encode(resp)
 		return
 	}
 
 	resp := map[string]interface{}{
-		"type":    "SEND_FILE",
+		"type":    "FILE_CONTENT",
 		"name":    name,
 		"content": base64.StdEncoding.EncodeToString(data),
-		"isDir":   false,
 	}
 	_ = json.NewEncoder(conn).Encode(resp)
+	fmt.Println("📤 Archivo enviado correctamente:", name)
 }
 
 func handleReceiveFile(request map[string]interface{}) {
@@ -266,6 +275,8 @@ func requestFileFromPeer(peer PeerInfo, filename string) {
 	}
 
 	if resp["type"] != "FILE_CONTENT" {
+		errMsg, _ := resp["error"].(string)
+		fmt.Printf("❌ Error del peer remoto: %v\n", errMsg)
 		return
 	}
 

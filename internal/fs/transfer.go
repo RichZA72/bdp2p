@@ -91,7 +91,6 @@ func sendDirectoryRecursively(p peer.PeerInfo, root string) error {
 	})
 }
 
-// RequestFileFromPeer solicita un archivo desde otro nodo y lo guarda localmente
 func RequestFileFromPeer(p peer.PeerInfo, filename string) error {
 	if !state.OnlineStatus[p.IP] {
 		state.AddPendingOp(p.ID, state.PendingOperation{
@@ -123,8 +122,10 @@ func RequestFileFromPeer(p peer.PeerInfo, filename string) error {
 	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
 		return fmt.Errorf("error al recibir archivo: %w", err)
 	}
+
 	if resp["type"] != "FILE_CONTENT" {
-		return fmt.Errorf("respuesta inesperada del peer")
+		errMsg, _ := resp["error"].(string)
+		return fmt.Errorf("respuesta inesperada del peer: %v", errMsg)
 	}
 
 	decoded, err := base64.StdEncoding.DecodeString(resp["content"].(string))
@@ -132,8 +133,20 @@ func RequestFileFromPeer(p peer.PeerInfo, filename string) error {
 		return fmt.Errorf("error al decodificar contenido: %w", err)
 	}
 
-	return os.WriteFile(filepath.Join("shared", filename), decoded, 0644)
+	path := filepath.Join("shared", filename)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("error creando carpetas destino: %w", err)
+	}
+
+	if err := os.WriteFile(path, decoded, 0644); err != nil {
+		return fmt.Errorf("error al guardar archivo: %w", err)
+	}
+
+	fmt.Println("✅ Archivo transferido desde", p.IP, "→", path)
+	return nil
 }
+
+
 
 // RelayFileBetweenPeers reenvía un archivo o carpeta desde un nodo fuente a múltiples destinos
 func RelayFileBetweenPeers(source peer.PeerInfo, filename string, targets []peer.PeerInfo) error {

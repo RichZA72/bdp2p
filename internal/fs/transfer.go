@@ -18,12 +18,17 @@ import (
 func SendFileToPeer(p peer.PeerInfo, filename string) error {
 	cleanPath := filepath.Clean(filename)
 	filePath := filepath.Join("shared", cleanPath)
+
 	info, err := os.Stat(filePath)
 	if err != nil {
 		return fmt.Errorf("no se pudo acceder a %s: %w", cleanPath, err)
 	}
 
-	if info.IsDir() {
+	// 🔍 LOG: mostrar si es archivo o directorio
+	fmt.Printf("📦 Enviando %s — Es directorio: %v\n", cleanPath, info.IsDir())
+
+	// ✅ SOLO si es exactamente un directorio, mandamos recursivamente
+	if info.Mode().IsDir() {
 		// Enviar primero la carpeta vacía
 		conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", p.IP, p.Port))
 		if err != nil {
@@ -45,7 +50,7 @@ func SendFileToPeer(p peer.PeerInfo, filename string) error {
 		return sendDirectoryRecursively(p, cleanPath)
 	}
 
-	// Es un archivo normal
+	// ✅ Enviar un archivo individual
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", p.IP, p.Port))
 	if err != nil {
 		return fmt.Errorf("no se pudo conectar a %s: %w", p.IP, err)
@@ -65,6 +70,7 @@ func SendFileToPeer(p peer.PeerInfo, filename string) error {
 	}
 	return json.NewEncoder(conn).Encode(msg)
 }
+
 
 // sendDirectoryRecursively envía todos los archivos dentro de una carpeta
 func sendDirectoryRecursively(p peer.PeerInfo, root string) error {

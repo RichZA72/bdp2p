@@ -263,7 +263,7 @@ func Run(peerSystem *peer.Peer) {
 				}
 				clean := strings.TrimPrefix(fname, "shared/")
 				selectedFile = &fs.SelectedFile{FileName: clean, PeerID: pid}
-
+				fmt.Println("📂 Archivo seleccionado:", fname)
 				selectedButton = thisBtn
 				thisBtn.Importance = widget.HighImportance
 				thisBtn.Refresh()

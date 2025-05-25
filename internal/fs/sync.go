@@ -13,14 +13,16 @@ import (
 	"p2pfs/internal/peer"
 )
 
-// 🆕 Aplica operaciones pendientes al reconectarse un nodo
+
+// ResyncAfterReconnect aplica operaciones pendientes a un nodo recién reconectado
 func ResyncAfterReconnect(peerID int) {
 	fmt.Printf("🔄 ResyncAfterReconnect: ejecutando para nodo %d\n", peerID)
 
 	ops := state.GetAndClearPendingOps(peerID)
 	peers := peer.GetPeers()
+	localID := peer.Local.ID
 
-	// Mapa rápido de ID a PeerInfo
+	// Mapa de ID a PeerInfo
 	peerMap := make(map[int]peer.PeerInfo)
 	for _, p := range peers {
 		peerMap[p.ID] = p
@@ -35,47 +37,53 @@ func ResyncAfterReconnect(peerID int) {
 	for _, op := range ops {
 		switch op.Type {
 		case "send":
-			// Si yo soy el que envía
-			if op.SourceID == -1 || op.SourceID == peer.GetPeers()[0].ID {
+			if op.SourceID == localID || op.SourceID == -1 {
+				// Enviar archivo directamente
 				err := SendFileToPeer(target, op.FilePath)
 				if err != nil {
-					fmt.Printf("❌ Error reenviando archivo pendiente: %s → %v\n", op.FilePath, err)
+					fmt.Printf("❌ Error reenviando archivo: %s → %v\n", op.FilePath, err)
 				} else {
 					fmt.Printf("📤 Archivo reenviado tras reconexión: %s\n", op.FilePath)
-					peer.SendSyncLog("TRANSFER", op.FilePath, peer.GetPeers()[0].ID, peerID)
+					peer.SendSyncLog("TRANSFER", op.FilePath, localID, peerID)
 				}
 			} else {
-				origin, exists := peerMap[op.SourceID]
+				// Relay desde otro nodo fuente
+				source, exists := peerMap[op.SourceID]
 				if exists {
-					fmt.Printf("📥 Solicitando archivo %s desde %s para %s (relay)\n", op.FilePath, origin.IP, target.IP)
-					err := RelayFileBetweenPeers(origin, op.FilePath, []peer.PeerInfo{target})
+					fmt.Printf("📥 Relay: solicitar %s desde %s para %s\n", op.FilePath, source.IP, target.IP)
+					err := RelayFileBetweenPeers(source, op.FilePath, []peer.PeerInfo{target})
 					if err != nil {
 						fmt.Printf("❌ Error en relay: %v\n", err)
 					}
 				}
 			}
+
 		case "get":
-			if op.SourceID != -1 {
-				requester, exists := peerMap[op.SourceID]
-				if exists {
-					fmt.Printf("📤 Enviando archivo %s a %s que lo pidió mientras yo estaba desconectado\n", op.FilePath, requester.IP)
-					err := SendFileToPeer(requester, op.FilePath)
-					if err != nil {
-						fmt.Printf("❌ Error al enviar archivo tras reconexión: %v\n", err)
-					} else {
-						peer.SendSyncLog("TRANSFER", op.FilePath, peerID, requester.ID)
-					}
+			// Nodo reconectado era quien tenía el archivo → reenviar a quien lo solicitó
+			requester, exists := peerMap[op.SourceID]
+			if exists {
+				fmt.Printf("📤 Reenviando %s a %s tras reconexión\n", op.FilePath, requester.IP)
+				err := SendFileToPeer(requester, op.FilePath)
+				if err != nil {
+					fmt.Printf("❌ Error al enviar tras reconexión: %v\n", err)
+				} else {
+					peer.SendSyncLog("TRANSFER", op.FilePath, peerID, requester.ID)
 				}
 			}
+
 		case "delete":
+			// Solicitar eliminación
 			sendDeleteRequest(target, op.FilePath)
 			fmt.Printf("🗑️ Eliminación reenviada tras reconexión: %s\n", op.FilePath)
-			peer.SendSyncLog("DELETE", op.FilePath, peer.GetPeers()[0].ID, peerID)
+			peer.SendSyncLog("DELETE", op.FilePath, localID, peerID)
+
 		default:
-			fmt.Println("⚠️ Operación desconocida:", op.Type)
+			fmt.Printf("⚠️ Tipo de operación desconocido: %s\n", op.Type)
 		}
 	}
 }
+
+
 
 func fileExistsLocally(name string, list []FileInfo) bool {
 	for _, f := range list {

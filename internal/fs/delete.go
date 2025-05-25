@@ -11,7 +11,7 @@ import (
 	"p2pfs/internal/state"
 )
 
-// DeleteFile maneja eliminación local, remota o desconectada
+// DeleteFile maneja eliminación local, remota o diferida (pendiente)
 func DeleteFile(peerSystem *peer.Peer, selected SelectedFile) error {
 	localID := peerSystem.Local.ID
 
@@ -22,10 +22,12 @@ func DeleteFile(peerSystem *peer.Peer, selected SelectedFile) error {
 		if err != nil {
 			return fmt.Errorf("error al eliminar archivo local: %w", err)
 		}
+		// 🔄 Notificar a los otros nodos para reflejar el cambio
+		peer.SendSyncLog("DELETE", selected.FileName, localID, localID)
 		return nil
 	}
 
-	// Buscar al peer destino
+	// Buscar información del nodo remoto
 	var remotePeer *peer.PeerInfo
 	for _, p := range peerSystem.Peers {
 		if p.ID == selected.PeerID {
@@ -38,28 +40,27 @@ func DeleteFile(peerSystem *peer.Peer, selected SelectedFile) error {
 	}
 
 	if !state.OnlineStatus[remotePeer.IP] {
-		// ❌ Nodo desconectado → eliminación visual + registrar pendiente
+		// ❌ Nodo desconectado → eliminación visual y registro como pendiente
 		state.RemoveFileFromCache(remotePeer.IP, selected.FileName)
 		state.AddPendingOp(remotePeer.ID, state.PendingOperation{
 			Type:     "delete",
 			FilePath: selected.FileName,
 			TargetID: remotePeer.ID,
-			SourceID: peerSystem.Local.ID,
+			SourceID: localID,
 		})
-		// 🔄 Notificar visualmente a los demás
-		peer.SendSyncLog("DELETE", selected.FileName, peerSystem.Local.ID, remotePeer.ID)
-		return fmt.Errorf("nodo desconectado, archivo eliminado visualmente y registrado")
+		peer.SendSyncLog("DELETE", selected.FileName, localID, remotePeer.ID)
+		return fmt.Errorf("nodo desconectado, eliminación registrada como pendiente")
 	}
 
-	// 🌐 Nodo en línea → eliminación remota
+	// 🌐 Nodo conectado → enviar solicitud de eliminación
 	go func() {
 		sendDeleteRequest(*remotePeer, selected.FileName)
-		peer.SendSyncLog("DELETE", selected.FileName, peerSystem.Local.ID, remotePeer.ID)
+		peer.SendSyncLog("DELETE", selected.FileName, localID, remotePeer.ID)
 	}()
 	return nil
 }
 
-// sendDeleteRequest envía un mensaje DELETE_FILE a otro nodo
+// sendDeleteRequest envía un mensaje DELETE_FILE a un nodo remoto por TCP
 func sendDeleteRequest(p peer.PeerInfo, filename string) {
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", p.IP, p.Port))
 	if err != nil {

@@ -93,23 +93,31 @@ func Run(peerSystem *peer.Peer) {
 		for id, chk := range peerCheckMap {
 			checked[id] = chk.Checked
 		}
+		
 		n, err := fs.TransferFile(peerSystem, *selectedFile, checked)
-		if err != nil {
-			statusLabel.SetText("⚠️ " + err.Error())
-		} else {
-			statusLabel.SetText(fmt.Sprintf("📤 Archivo enviado a %d máquina(s).", n))
+if err != nil {
+	statusLabel.SetText("⚠️ " + err.Error())
+} else {
+	statusLabel.SetText(fmt.Sprintf("📤 Archivo enviado a %d máquina(s).", n))
 
-			// ✅ Actualización forzada tras la transferencia
-			for _, p := range peerSystem.Peers {
-				if p.ID == localID || checked[p.ID] {
-					go func(pid int) {
-						files, _ := fs.GetLocalOrRemoteFileList(peerSystem, pid)
-						fileCache[pid] = files
-						renderFileList(pid)
-					}(p.ID)
-				}
+	// ✅ Forzar actualización inmediata del panel local y destinos
+	go func() {
+		// Actualizar local
+		localFiles := fs.ListSharedFiles()
+		fileCache[localID] = localFiles
+		renderFileList(localID)
+
+		// Actualizar nodos destino marcados
+		for id, ok := range checked {
+			if ok {
+				files, _ := fs.GetLocalOrRemoteFileList(peerSystem, id)
+				fileCache[id] = files
+				renderFileList(id)
 			}
 		}
+	}()
+}
+
 	})
 
 	header := container.NewVBox(

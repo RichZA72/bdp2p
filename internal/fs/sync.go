@@ -143,7 +143,7 @@ func StartAutoSync(peerSystem *peer.Peer, localID int, callbacks SyncCallbacks) 
 						files = tmp
 					}
 				} else {
-					files = listSharedFiles()
+					files = ListSharedFiles()
 				}
 
 				wasOnline := state.OnlineStatus[pinfo.IP]
@@ -167,7 +167,7 @@ func StartAutoSync(peerSystem *peer.Peer, localID int, callbacks SyncCallbacks) 
 }
 
 // listSharedFiles devuelve los archivos locales compartidos
-func listSharedFiles() []state.FileInfo {
+func ListSharedFiles() []state.FileInfo {
 	var files []state.FileInfo
 	_ = filepath.Walk("shared", func(path string, info os.FileInfo, err error) error {
 		if err != nil || path == "shared" {
@@ -187,7 +187,7 @@ func listSharedFiles() []state.FileInfo {
 // GetLocalOrRemoteFileList es usada por la GUI para forzar sincronización inmediata
 func GetLocalOrRemoteFileList(peerSystem *peer.Peer, peerID int) ([]state.FileInfo, error) {
 	if peerID == peerSystem.Local.ID {
-		return listSharedFiles(), nil
+		return ListSharedFiles(), nil
 	}
 	for _, p := range peerSystem.Peers {
 		if p.ID == peerID {

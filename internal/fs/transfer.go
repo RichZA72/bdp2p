@@ -91,9 +91,12 @@ func sendDirectoryRecursively(p peer.PeerInfo, root string) error {
 	})
 }
 
+
 // RequestFileFromPeer solicita un archivo desde otro nodo y lo guarda localmente
+// RequestFileFromPeer solicita un archivo o carpeta desde otro nodo y lo guarda localmente
 func RequestFileFromPeer(p peer.PeerInfo, filename string) error {
 	if !state.OnlineStatus[p.IP] {
+		// Guardar operación pendiente
 		state.AddPendingOp(p.ID, state.PendingOperation{
 			Type:     "get",
 			FilePath: filename,
@@ -105,6 +108,27 @@ func RequestFileFromPeer(p peer.PeerInfo, filename string) error {
 		return nil
 	}
 
+	// Intentar obtener la lista completa (por si es directorio)
+	files, err := requestRemoteFileList(p, filename)
+	if err == nil && len(files) > 0 {
+		fmt.Printf("📁 '%s' es un directorio remoto con %d archivos\n", filename, len(files))
+
+		// Crear la carpeta raíz local
+		rootPath := filepath.Join("shared", filename)
+		if err := os.MkdirAll(rootPath, 0755); err != nil {
+			return fmt.Errorf("error creando carpeta local: %w", err)
+		}
+
+		// Solicitar cada archivo del directorio
+		for _, f := range files {
+			if err := RequestFileFromPeer(p, f.Name); err != nil {
+				fmt.Printf("❌ Error al solicitar %s: %v\n", f.Name, err)
+			}
+		}
+		return nil
+	}
+
+	// Si no es carpeta o no hubo archivos, intentar como archivo individual
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", p.IP, p.Port))
 	if err != nil {
 		return fmt.Errorf("no se pudo conectar a %s: %w", p.IP, err)
@@ -146,6 +170,8 @@ func RequestFileFromPeer(p peer.PeerInfo, filename string) error {
 	fmt.Println("✅ Archivo transferido desde", p.IP, "→", path)
 	return nil
 }
+
+
 
 // RelayFileBetweenPeers reenvía un archivo o carpeta desde un nodo fuente a múltiples destinos
 func RelayFileBetweenPeers(source peer.PeerInfo, filename string, targets []peer.PeerInfo) error {

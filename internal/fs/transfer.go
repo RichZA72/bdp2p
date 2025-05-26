@@ -26,11 +26,10 @@ func SendFileToPeer(p peer.PeerInfo, filename string) error {
 
 	fmt.Printf("📦 Enviando %s — Es directorio: %v\n", cleanPath, info.IsDir())
 
-	if info.IsDir() && !strings.Contains(cleanPath, "/") {
+	if info.IsDir() {
 		return sendDirectoryRecursively(p, cleanPath)
 	}
 
-	// Enviar solo el archivo base (sin carpetas)
 	return sendSingleFile(p, filePath, filepath.Base(cleanPath))
 }
 
@@ -143,6 +142,27 @@ func RequestFileFromPeer(p peer.PeerInfo, filename string) error {
 	}
 
 	fmt.Println("✅ Archivo transferido desde", p.IP, "→", path)
+	return nil
+}
+
+// RequestDirectoryFromPeer solicita todos los archivos dentro de un directorio remoto
+func RequestDirectoryFromPeer(p peer.PeerInfo, dir string) error {
+	files, err := requestRemoteFileList(p, dir)
+	if err != nil {
+		return fmt.Errorf("no se pudo obtener archivos de %s: %w", dir, err)
+	}
+
+	if len(files) == 0 {
+		return fmt.Errorf("el directorio remoto está vacío o no se encontró: %s", dir)
+	}
+
+	for _, f := range files {
+		err := RequestFileFromPeer(p, f.Name)
+		if err != nil {
+			fmt.Printf("⚠️ Error al solicitar %s: %v\n", f.Name, err)
+		}
+	}
+
 	return nil
 }
 
@@ -283,6 +303,9 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 	if selected.PeerID != localID && !anyChecked(checkedPeers) {
 		for _, p := range peerSystem.Peers {
 			if p.ID == selected.PeerID {
+				if strings.HasSuffix(selected.FileName, "/") || strings.Contains(selected.FileName, "/") {
+					return 1, RequestDirectoryFromPeer(p, selected.FileName)
+				}
 				return 1, RequestFileFromPeer(p, selected.FileName)
 			}
 		}

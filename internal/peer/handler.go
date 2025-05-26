@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"time"
-
+	"strings"
 	"p2pfs/internal/state"
 )
 
@@ -121,14 +121,19 @@ func handleSendFile(conn net.Conn, name string) {
 	fmt.Println("📤 Archivo enviado correctamente:", name)
 }
 
+
 func handleReceiveFile(request map[string]interface{}) {
 	name, ok1 := request["name"].(string)
 	content, ok2 := request["content"].(string)
 	isDir, _ := request["isDir"].(bool)
 
-	path := filepath.Join("shared", name)
+	// ✅ Nuevo comportamiento:
+	// Si el nombre tiene separadores de ruta, se considera con estructura.
+	hasPath := strings.Contains(name, "/") || strings.Contains(name, "\\")
 
+	var path string
 	if isDir {
+		path = filepath.Join("shared", name)
 		if err := os.MkdirAll(path, 0755); err != nil {
 			fmt.Println("❌ Error al crear carpeta recibida:", err)
 		} else {
@@ -140,6 +145,13 @@ func handleReceiveFile(request map[string]interface{}) {
 	if !ok1 || !ok2 {
 		fmt.Println("❌ Formato inválido en archivo recibido")
 		return
+	}
+
+	// Si tiene subruta, respeta la estructura. Si no, lo guarda directo.
+	if hasPath {
+		path = filepath.Join("shared", name)
+	} else {
+		path = filepath.Join("shared", filepath.Base(name))
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -159,8 +171,10 @@ func handleReceiveFile(request map[string]interface{}) {
 		return
 	}
 
-	fmt.Println("📥 Archivo recibido y guardado:", name)
+	fmt.Println("📥 Archivo recibido y guardado:", path)
 }
+
+
 
 func handleDeleteFile(conn net.Conn, name string) {
 	path := filepath.Join("shared", name)

@@ -26,21 +26,19 @@ func SendFileToPeer(p peer.PeerInfo, filename string) error {
 
 	fmt.Printf("📦 Enviando %s — Es directorio: %v\n", cleanPath, info.IsDir())
 
-	// Solo transfiere la carpeta si fue seleccionada directamente (no un archivo dentro de ella)
 	if info.IsDir() && !strings.Contains(cleanPath, "/") {
 		return sendDirectoryRecursively(p, cleanPath)
 	}
 
-	// Si es un archivo o un archivo dentro de un directorio, se envía como archivo individual
-	return sendSingleFile(p, cleanPath)
+	// Enviar solo el archivo base (sin carpetas)
+	return sendSingleFile(p, filePath, filepath.Base(cleanPath))
 }
 
-// sendSingleFile envía únicamente un archivo, sin validaciones adicionales
-func sendSingleFile(p peer.PeerInfo, relPath string) error {
-	filePath := filepath.Join("shared", relPath)
-	data, err := os.ReadFile(filePath)
+// sendSingleFile envía un archivo sin su ruta original
+func sendSingleFile(p peer.PeerInfo, fullPath string, sendAsName string) error {
+	data, err := os.ReadFile(fullPath)
 	if err != nil {
-		return fmt.Errorf("no se pudo leer %s: %w", relPath, err)
+		return fmt.Errorf("no se pudo leer %s: %w", fullPath, err)
 	}
 
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", p.IP, p.Port))
@@ -51,14 +49,14 @@ func sendSingleFile(p peer.PeerInfo, relPath string) error {
 
 	msg := map[string]interface{}{
 		"type":    "SEND_FILE",
-		"name":    relPath,
+		"name":    sendAsName,
 		"content": base64.StdEncoding.EncodeToString(data),
 		"isDir":   false,
 	}
 	return json.NewEncoder(conn).Encode(msg)
 }
 
-// sendDirectoryRecursively envía todos los archivos dentro de una carpeta
+// sendDirectoryRecursively envía todos los archivos dentro de una carpeta con estructura
 func sendDirectoryRecursively(p peer.PeerInfo, root string) error {
 	rootPath := filepath.Join("shared", root)
 	return filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
@@ -88,10 +86,11 @@ func sendDirectoryRecursively(p peer.PeerInfo, root string) error {
 			return nil
 		}
 
-		return sendSingleFile(p, relPath)
+		return sendSingleFile(p, path, relPath)
 	})
 }
 
+// RequestFileFromPeer solicita un archivo desde otro nodo
 func RequestFileFromPeer(p peer.PeerInfo, filename string) error {
 	if !state.OnlineStatus[p.IP] {
 		state.AddPendingOp(p.ID, state.PendingOperation{
@@ -231,6 +230,7 @@ func RelayFileBetweenPeers(source peer.PeerInfo, filename string, targets []peer
 			"type":    "SEND_FILE",
 			"name":    filename,
 			"content": base64.StdEncoding.EncodeToString(data),
+			"isDir":   false,
 		}
 		json.NewEncoder(connT).Encode(msg)
 		peer.SendSyncLog("TRANSFER", filename, source.ID, target.ID)
@@ -344,7 +344,6 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 	return 0, fmt.Errorf("ninguna operación válida de transferencia")
 }
 
-// anyChecked indica si se seleccionó al menos un destino
 func anyChecked(m map[int]bool) bool {
 	for _, v := range m {
 		if v {

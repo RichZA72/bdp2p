@@ -44,6 +44,7 @@ type PendingOperation struct {
 	FilePath string
 	TargetID int // Nodo destinatario
 	SourceID int // Nodo origen (quien inicia la operación)
+	Flatten  bool // ✅ Nuevo campo: indica si se debe guardar sin estructura
 	// Futuras extensiones: Estado visual, timestamp, etc.
 }
 

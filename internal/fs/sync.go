@@ -21,6 +21,7 @@ func ResyncAfterReconnect(peerID int) {
 	peers := peer.GetPeers()
 	localID := peer.Local.ID
 
+	// Mapa para acceso rápido por ID
 	peerMap := make(map[int]peer.PeerInfo)
 	for _, p := range peers {
 		peerMap[p.ID] = p
@@ -33,65 +34,33 @@ func ResyncAfterReconnect(peerID int) {
 	}
 
 	for _, op := range ops {
-		relPath := filepath.Clean(op.FilePath)
-
 		switch op.Type {
-
-		case "get":
-			if op.TargetID == localID {
-				// Yo solicité un archivo: pedirlo al SourceID
-				sourcePeer, exists := peerMap[op.SourceID]
-				if !exists {
-					fmt.Printf("⚠️ Source peer %d no encontrado para obtener '%s'\n", op.SourceID, relPath)
-					continue
-				}
-				err := RequestFileFromPeer(sourcePeer, relPath)
-				if err != nil {
-					fmt.Printf("❌ Error al obtener '%s' desde nodo %d: %v\n", relPath, op.SourceID, err)
-				} else {
-					fmt.Printf("📥 '%s' recibido tras reconexión desde %d\n", relPath, op.SourceID)
-				}
-			}
-
 		case "send":
-			targetPeer, exists := peerMap[op.TargetID]
-			if !exists {
-				fmt.Printf("⚠️ Nodo destino %d no encontrado\n", op.TargetID)
-				continue
-			}
-
-			localFile := filepath.Join("shared", relPath)
-			if _, err := os.Stat(localFile); err == nil {
-				err := SendFileToPeer(targetPeer, relPath)
+			// Enviar archivo si este nodo es el origen
+			if op.SourceID == localID {
+				err := SendFileToPeer(target, op.FilePath)
 				if err != nil {
-					fmt.Printf("❌ Error al reenviar '%s' a nodo %d: %v\n", relPath, op.TargetID, err)
-				} else {
-					fmt.Printf("📤 '%s' reenviado tras reconexión\n", relPath)
-					peer.SendSyncLog("TRANSFER", relPath, localID, op.TargetID)
+					fmt.Printf("❌ Error al reenviar archivo a %s: %v\n", target.IP, err)
 				}
-			} else if localID == op.SourceID {
-				sourcePeer := peerMap[op.SourceID]
-				err := RelayFileBetweenPeers(sourcePeer, relPath, []peer.PeerInfo{targetPeer})
-				if err != nil {
-					fmt.Printf("❌ Relay fallido para '%s': %v\n", relPath, err)
-				} else {
-					fmt.Printf("📥 Relay de '%s' realizado a %d\n", relPath, op.TargetID)
-				}
-			} else {
-				fmt.Printf("⚠️ Archivo '%s' no disponible y no soy SourceID\n", relPath)
 			}
-
+		case "get":
+			// Solicitar archivo si este nodo es el destino
+			if op.TargetID == localID {
+				err := RequestFileFromPeer(target, op.FilePath, op.Flatten)
+				if err != nil {
+					fmt.Printf("❌ Error al solicitar archivo %s: %v\n", op.FilePath, err)
+				}
+			}
 		case "delete":
-			sendDeleteRequest(target, op.FilePath)
-			fmt.Printf("🗑️ Eliminación reenviada tras reconexión: %s\n", op.FilePath)
-			peer.SendSyncLog("DELETE", op.FilePath, localID, peerID)
-
+			// Enviar solicitud de eliminación si este nodo es el origen
+			if op.SourceID == localID {
+				go sendDeleteRequest(target, op.FilePath)
+			}
 		default:
-			fmt.Printf("⚠️ Tipo de operación desconocido: %s\n", op.Type)
+			fmt.Printf("⚠️ Operación desconocida: %s\n", op.Type)
 		}
 	}
 }
-
 
 
 

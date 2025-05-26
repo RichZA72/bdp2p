@@ -98,13 +98,14 @@ func sendDirectoryRecursively(p peer.PeerInfo, root string) error {
 
 
 // RequestFileFromPeer solicita un archivo desde otro nodo
-func RequestFileFromPeer(p peer.PeerInfo, filename string) error {
+func RequestFileFromPeer(p peer.PeerInfo, filename string, flatten bool) error {
 	if !state.OnlineStatus[p.IP] {
 		state.AddPendingOp(p.ID, state.PendingOperation{
 			Type:     "get",
 			FilePath: filename,
 			TargetID: peer.Local.ID,
 			SourceID: p.ID,
+			Flatten:  flatten, // ✅ nuevo campo
 		})
 		peer.SendSyncLog("GET_FILE", filename, p.ID, peer.Local.ID)
 		fmt.Printf("📥 Solicitud pendiente: archivo '%s' será enviado desde %s al reconectarse\n", filename, p.IP)
@@ -140,7 +141,14 @@ func RequestFileFromPeer(p peer.PeerInfo, filename string) error {
 		return fmt.Errorf("error al decodificar contenido: %w", err)
 	}
 
-	path := filepath.Join("shared", filename)
+	// ✅ Cambiar forma de guardar según flatten
+	var path string
+	if flatten {
+		path = filepath.Join("shared", filepath.Base(filename)) // sin carpeta
+	} else {
+		path = filepath.Join("shared", filename) // con estructura
+	}
+
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return fmt.Errorf("error creando carpetas destino: %w", err)
 	}
@@ -152,6 +160,8 @@ func RequestFileFromPeer(p peer.PeerInfo, filename string) error {
 	fmt.Println("✅ Archivo transferido desde", p.IP, "→", path)
 	return nil
 }
+
+
 
 // RequestDirectoryFromPeer solicita todos los archivos dentro de un directorio remoto
 func RequestDirectoryFromPeer(p peer.PeerInfo, dir string) error {
@@ -190,7 +200,7 @@ func RequestDirectoryFromPeer(p peer.PeerInfo, dir string) error {
 	}
 
 	for _, f := range files {
-		err := RequestFileFromPeer(p, f.Name)
+		err := RequestFileFromPeer(p, f.Name, false)
 		if err != nil {
 			fmt.Printf("⚠️ Error al solicitar %s: %v\n", f.Name, err)
 		}
@@ -372,7 +382,7 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 					return 1, RequestDirectoryFromPeer(p, selected.FileName)
 					}
 				}
-				return 1, RequestFileFromPeer(p, selected.FileName)
+				return 1, RequestFileFromPeer(p, selected.FileName, true)
 			}
 		}
 		return 0, fmt.Errorf("peer origen no encontrado")

@@ -286,14 +286,20 @@ func requestRemoteFileList(peer peer.PeerInfo, dir string) ([]state.FileInfo, er
 	var files []state.FileInfo
 	json.Unmarshal(rawList, &files)
 
+	// ✅ Fix aquí: para detectar todos los archivos dentro del directorio solicitado
+	dir = strings.TrimSuffix(dir, "/") // aseguramos que no tenga / al final
+
 	var result []state.FileInfo
 	for _, f := range files {
-		if strings.HasPrefix(f.Name, dir+"/") {
+		if f.Name == dir || strings.HasPrefix(f.Name, dir+"/") {
 			result = append(result, f)
 		}
 	}
 	return result, nil
 }
+
+
+
 
 // TransferFile decide cómo enviar un archivo o carpeta basado en el origen y destinos seleccionados
 func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map[int]bool) (int, error) {

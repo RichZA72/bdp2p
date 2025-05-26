@@ -26,8 +26,8 @@ func SendFileToPeer(p peer.PeerInfo, filename string) error {
 
 	fmt.Printf("📦 Enviando %s — Es directorio: %v\n", cleanPath, info.IsDir())
 
-	// Solo transfiere la carpeta si el usuario seleccionó el directorio explícitamente
-	if info.IsDir() {
+	// Solo transferir la carpeta si fue seleccionada directamente
+	if info.IsDir() && cleanPath == info.Name() {
 		return sendDirectoryRecursively(p, cleanPath)
 	}
 
@@ -91,6 +91,7 @@ func sendDirectoryRecursively(p peer.PeerInfo, root string) error {
 	})
 }
 
+// RequestFileFromPeer solicita un archivo desde otro nodo y lo guarda localmente
 func RequestFileFromPeer(p peer.PeerInfo, filename string) error {
 	if !state.OnlineStatus[p.IP] {
 		state.AddPendingOp(p.ID, state.PendingOperation{
@@ -146,8 +147,6 @@ func RequestFileFromPeer(p peer.PeerInfo, filename string) error {
 	return nil
 }
 
-
-
 // RelayFileBetweenPeers reenvía un archivo o carpeta desde un nodo fuente a múltiples destinos
 func RelayFileBetweenPeers(source peer.PeerInfo, filename string, targets []peer.PeerInfo) error {
 	filename = filepath.Clean(filename)
@@ -156,7 +155,8 @@ func RelayFileBetweenPeers(source peer.PeerInfo, filename string, targets []peer
 	if err != nil {
 		return fmt.Errorf("no se pudo obtener lista de archivos de %s: %w", filename, err)
 	}
-	if len(files) > 0 {
+
+	if len(files) > 0 && filename == filepath.Dir(files[0].Name) {
 		for _, f := range files {
 			rel := f.Name
 			RelayFileBetweenPeers(source, rel, targets)

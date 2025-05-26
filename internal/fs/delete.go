@@ -6,7 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-
+	"strings"
 	"p2pfs/internal/peer"
 	"p2pfs/internal/state"
 )

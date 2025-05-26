@@ -21,7 +21,6 @@ func ResyncAfterReconnect(peerID int) {
 	peers := peer.GetPeers()
 	localID := peer.Local.ID
 
-	// Mapa para acceso rápido por ID
 	peerMap := make(map[int]peer.PeerInfo)
 	for _, p := range peers {
 		peerMap[p.ID] = p
@@ -36,31 +35,27 @@ func ResyncAfterReconnect(peerID int) {
 	for _, op := range ops {
 		switch op.Type {
 		case "send":
-			// Enviar archivo si este nodo es el origen
 			if op.SourceID == localID {
-				err := SendFileToPeer(target, op.FilePath)
+				err := SendFileToPeer(target, op.FilePath, op.Flatten)
 				if err != nil {
-					fmt.Printf("❌ Error al reenviar archivo a %s: %v\n", target.IP, err)
+					fmt.Printf("❌ Error al reenviar %s: %v\n", op.FilePath, err)
 				}
 			}
 		case "get":
-			// Solicitar archivo si este nodo es el destino
 			if op.TargetID == localID {
 				err := RequestFileFromPeer(target, op.FilePath, op.Flatten)
 				if err != nil {
-					fmt.Printf("❌ Error al solicitar archivo %s: %v\n", op.FilePath, err)
+					fmt.Printf("❌ Error al solicitar %s: %v\n", op.FilePath, err)
 				}
 			}
 		case "delete":
-			// Enviar solicitud de eliminación si este nodo es el origen
 			if op.SourceID == localID {
 				go sendDeleteRequest(target, op.FilePath)
 			}
-		default:
-			fmt.Printf("⚠️ Operación desconocida: %s\n", op.Type)
 		}
 	}
 }
+
 
 
 

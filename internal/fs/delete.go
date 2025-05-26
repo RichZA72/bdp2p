@@ -48,15 +48,45 @@ func DeleteFile(peerSystem *peer.Peer, selected SelectedFile) error {
 	}
 
 	if !state.OnlineStatus[remotePeer.IP] {
-		// Nodo desconectado → eliminar visualmente y registrar como pendiente
-		state.RemoveFileFromCache(remotePeer.IP, selected.FileName)
-		state.AddPendingOp(remotePeer.ID, state.PendingOperation{
-			Type:     "delete",
-			FilePath: selected.FileName,
-			TargetID: remotePeer.ID,
-			SourceID: localID,
-		})
-		peer.SendSyncLog("DELETE", selected.FileName, localID, remotePeer.ID)
+		// 🔴 Nodo desconectado → eliminación diferida (archivo o carpeta)
+		// Verificar si es un directorio
+		isDir := false
+		for _, f := range state.FileCache[remotePeer.IP] {
+			if f.Name == selected.FileName && f.IsDir {
+				isDir = true
+				break
+			}
+		}
+
+		if isDir {
+			// Eliminar visualmente y registrar cada archivo dentro del directorio
+			var nuevosCache []state.FileInfo
+			for _, f := range state.FileCache[remotePeer.IP] {
+				if strings.HasPrefix(f.Name, selected.FileName+"/") {
+					state.AddPendingOp(remotePeer.ID, state.PendingOperation{
+						Type:     "delete",
+						FilePath: f.Name,
+						TargetID: remotePeer.ID,
+						SourceID: localID,
+					})
+					peer.SendSyncLog("DELETE", f.Name, localID, remotePeer.ID)
+				} else {
+					nuevosCache = append(nuevosCache, f)
+				}
+			}
+			state.FileCache[remotePeer.IP] = nuevosCache
+		} else {
+			// Eliminar archivo individual
+			state.RemoveFileFromCache(remotePeer.IP, selected.FileName)
+			state.AddPendingOp(remotePeer.ID, state.PendingOperation{
+				Type:     "delete",
+				FilePath: selected.FileName,
+				TargetID: remotePeer.ID,
+				SourceID: localID,
+			})
+			peer.SendSyncLog("DELETE", selected.FileName, localID, remotePeer.ID)
+		}
+
 		return fmt.Errorf("nodo desconectado, eliminación registrada como pendiente")
 	}
 
@@ -67,6 +97,8 @@ func DeleteFile(peerSystem *peer.Peer, selected SelectedFile) error {
 	}()
 	return nil
 }
+
+
 
 // sendDeleteRequest envía DELETE_FILE a un nodo remoto, que debe decidir si es archivo o carpeta
 func sendDeleteRequest(p peer.PeerInfo, path string) {

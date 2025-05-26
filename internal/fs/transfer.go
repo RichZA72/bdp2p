@@ -147,6 +147,31 @@ func RequestFileFromPeer(p peer.PeerInfo, filename string) error {
 
 // RequestDirectoryFromPeer solicita todos los archivos dentro de un directorio remoto
 func RequestDirectoryFromPeer(p peer.PeerInfo, dir string) error {
+	if !state.OnlineStatus[p.IP] {
+		fmt.Printf("📥 Nodo %s desconectado, registrando solicitud de carpeta %s como pendiente\n", p.IP, dir)
+		
+		// Obtener archivos del FileCache de la última sincronización
+		for _, f := range state.FileCache[p.IP] {
+			if strings.HasPrefix(f.Name, dir+"/") && !f.IsDir {
+				state.AddPendingOp(p.ID, state.PendingOperation{
+					Type:     "get",
+					FilePath: f.Name,
+					TargetID: peer.Local.ID,
+					SourceID: p.ID,
+				})
+				// Mostrar visualmente lo que llegará
+				state.FileCache[p.IP] = append(state.FileCache[p.IP], state.FileInfo{
+					Name:    f.Name,
+					ModTime: f.ModTime,
+					IsDir:   false,
+				})
+				peer.SendSyncLog("GET_FILE", f.Name, p.ID, peer.Local.ID)
+			}
+		}
+		return nil
+	}
+
+	// Nodo en línea → obtener lista remota y solicitar cada archivo
 	files, err := requestRemoteFileList(p, dir)
 	if err != nil {
 		return fmt.Errorf("no se pudo obtener archivos de %s: %w", dir, err)
@@ -165,6 +190,7 @@ func RequestDirectoryFromPeer(p peer.PeerInfo, dir string) error {
 
 	return nil
 }
+
 
 // RelayFileBetweenPeers reenvía un archivo o carpeta desde un nodo fuente a múltiples destinos
 func RelayFileBetweenPeers(source peer.PeerInfo, filename string, targets []peer.PeerInfo) error {
@@ -214,20 +240,43 @@ func RelayFileBetweenPeers(source peer.PeerInfo, filename string, targets []peer
 	}
 
 	for _, target := range targets {
+		
+
 		if !state.OnlineStatus[target.IP] {
+	// Registrar como pendiente cada archivo del directorio
+	if len(files) > 0 {
+		for _, f := range files {
 			state.FileCache[target.IP] = append(state.FileCache[target.IP], state.FileInfo{
-				Name:    filename,
-				ModTime: time.Now(),
+				Name:    f.Name,
+				ModTime: f.ModTime,
+				IsDir:   f.IsDir,
 			})
 			state.AddPendingOp(target.ID, state.PendingOperation{
 				Type:     "send",
-				FilePath: filename,
+				FilePath: f.Name,
 				TargetID: target.ID,
 				SourceID: source.ID,
 			})
-			peer.SendSyncLog("TRANSFER", filename, source.ID, target.ID)
-			continue
+			peer.SendSyncLog("TRANSFER", f.Name, source.ID, target.ID)
 		}
+	} else {
+		// Caso: archivo único
+		state.FileCache[target.IP] = append(state.FileCache[target.IP], state.FileInfo{
+			Name:    filename,
+			ModTime: time.Now(),
+			IsDir:   false,
+		})
+		state.AddPendingOp(target.ID, state.PendingOperation{
+			Type:     "send",
+			FilePath: filename,
+			TargetID: target.ID,
+			SourceID: source.ID,
+		})
+		peer.SendSyncLog("TRANSFER", filename, source.ID, target.ID)
+		}
+		continue
+	}
+
 
 		connT, err := net.Dial("tcp", fmt.Sprintf("%s:%s", target.IP, target.Port))
 		if err != nil {

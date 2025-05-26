@@ -193,106 +193,112 @@ func Run(peerSystem *peer.Peer) {
 		},
 	})
 
-	renderFileList = func(peerID int) {
-		files := fileCache[peerID]
-		machineFileLists[peerID].Objects = nil
-		allOps := state.GetAllPendingOps()
+		renderFileList = func(peerID int) {
+	files := fileCache[peerID]
+	machineFileLists[peerID].Objects = nil
+	allOps := state.GetAllPendingOps()
 
-		for _, file := range files {
-			
-depth := strings.Count(file.Name, "/")
-if depth > 0 && !file.IsDir {
-    show := true
-    pathParts := strings.Split(file.Name, "/")
-    for i := 1; i < len(pathParts); i++ {
-        ancestor := strings.Join(pathParts[:i], "/")
-        if !expandedDirs[peerID][ancestor] {
-            show = false
-            break
-        }
-    }
-    if !show {
-        continue
-    }
-}
+	for _, file := range files {
+		depth := strings.Count(file.Name, "/")
+		pathParts := strings.Split(file.Name, "/")
 
-			name := filepath.Base(file.Name)
-			mod := file.ModTime.Format("02-Jan 15:04")
-			suffix := ""
-			for _, ops := range allOps {
-				for _, op := range ops {
-					if op.TargetID == peerID && op.FilePath == file.Name {
-						switch op.Type {
-						case "get":
-							suffix = " ⏳"
-						case "send":
-							suffix = " 📤"
-						case "delete":
-							suffix = " 🗑️"
-						}
-						break
+		// Ocultar archivos o carpetas si algún ancestro no está expandido
+		show := true
+		if depth > 0 {
+			for i := 1; i < len(pathParts); i++ {
+				ancestor := strings.Join(pathParts[:i], "/")
+				if !expandedDirs[peerID][ancestor] {
+					show = false
+					break
+				}
+			}
+		}
+		if !show {
+			continue
+		}
+
+		name := filepath.Base(file.Name)
+		mod := file.ModTime.Format("02-Jan 15:04")
+		suffix := ""
+		for _, ops := range allOps {
+			for _, op := range ops {
+				if op.TargetID == peerID && op.FilePath == file.Name {
+					switch op.Type {
+					case "get":
+						suffix = " ⏳"
+					case "send":
+						suffix = " 📤"
+					case "delete":
+						suffix = " 🗑️"
 					}
+					break
 				}
 			}
+		}
 
-			indent := strings.Repeat("   ", depth)
-			label := fmt.Sprintf("%s%s (%s)%s", indent, name, mod, suffix)
-			icon := getIconForFile(name, file.IsDir)
+		label := fmt.Sprintf("%s (%s)%s", name, mod, suffix)
+		icon := getIconForFile(name, file.IsDir)
+		btn := widget.NewButtonWithIcon(label, icon, nil)
+		btn.Alignment = widget.ButtonAlignLeading
+		btn.Importance = widget.MediumImportance
 
-			btn := widget.NewButtonWithIcon(label, icon, nil)
-			btn.Alignment = widget.ButtonAlignLeading
-			btn.Importance = widget.MediumImportance
+		pid := peerID
+		fname := file.Name
+		thisBtn := btn
+		var lastClick time.Time
 
-			pid := peerID
-			fname := file.Name
-			thisBtn := btn
-			var lastClick time.Time
-
-			var arrow *widget.Button
-			if file.IsDir {
-				expanded := expandedDirs[pid][fname]
-				arrow = widget.NewButton("▸", nil)
-				if expanded {
-					arrow.SetText("▼")
-				}
-				arrow.OnTapped = func() {
-					expandedDirs[pid][fname] = !expandedDirs[pid][fname]
-					renderFileList(pid)
-				}
+		var arrow *widget.Button
+		if file.IsDir {
+			expanded := expandedDirs[pid][fname]
+			arrow = widget.NewButton("▸", nil)
+			if expanded {
+				arrow.SetText("▼")
 			}
-
-			btn.OnTapped = func() {
-				now := time.Now()
-				if selectedButton != nil {
-					selectedButton.Importance = widget.MediumImportance
-					selectedButton.Refresh()
-				}
-				clean := strings.TrimPrefix(fname, "shared/")
-				selectedFile = &fs.SelectedFile{FileName: clean, PeerID: pid}
-				selectedButton = thisBtn
-				thisBtn.Importance = widget.HighImportance
-				thisBtn.Refresh()
-				selectedLabel.SetText("Archivo seleccionado: " + name + " (Maq" + strconv.Itoa(pid) + ")")
-
-				if file.IsDir && now.Sub(lastClick) < 500*time.Millisecond {
-					expandedDirs[pid][fname] = !expandedDirs[pid][fname]
-					renderFileList(pid)
-				}
-				if pid == localID && now.Sub(lastClick) < 500*time.Millisecond && !file.IsDir {
-					go openFile(fname)
-				}
-				lastClick = now
+			arrow.OnTapped = func() {
+				expandedDirs[pid][fname] = !expandedDirs[pid][fname]
+				renderFileList(pid)
 			}
+		}
 
-			row := container.NewHBox()
-			if arrow != nil {
-				row.Add(arrow)
+		btn.OnTapped = func() {
+			now := time.Now()
+			if selectedButton != nil {
+				selectedButton.Importance = widget.MediumImportance
+				selectedButton.Refresh()
 			}
-			row.Add(btn)
+			clean := strings.TrimPrefix(fname, "shared/")
+			selectedFile = &fs.SelectedFile{FileName: clean, PeerID: pid}
+			selectedButton = thisBtn
+			thisBtn.Importance = widget.HighImportance
+			thisBtn.Refresh()
+			selectedLabel.SetText("Archivo seleccionado: " + name + " (Maq" + strconv.Itoa(pid) + ")")
+
+			if file.IsDir && now.Sub(lastClick) < 500*time.Millisecond {
+				expandedDirs[pid][fname] = !expandedDirs[pid][fname]
+				renderFileList(pid)
+			}
+			if pid == localID && now.Sub(lastClick) < 500*time.Millisecond && !file.IsDir {
+				go openFile(fname)
+			}
+			lastClick = now
+		}
+
+		// 🔽 INDENTACIÓN VISUAL
+		indentSpace := canvas.NewRectangle(color.Transparent)
+		indentSpace.SetMinSize(fyne.NewSize(float32(depth*35), 1)) // 25px por nivel
+
+		row := container.NewHBox()
+		row.Add(indentSpace)
+		if arrow != nil {
+			row.Add(arrow)
+		}
+		row.Add(btn)
+
 			machineFileLists[peerID].Add(row)
 		}
 		machineFileLists[peerID].Refresh()
 	}
+
 
 	myApp.Run()
 }

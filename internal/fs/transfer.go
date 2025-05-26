@@ -58,16 +58,21 @@ func sendSingleFile(p peer.PeerInfo, fullPath string, sendAsName string) error {
 // sendDirectoryRecursively envía todos los archivos dentro de una carpeta con estructura
 func sendDirectoryRecursively(p peer.PeerInfo, root string) error {
 	rootPath := filepath.Join("shared", root)
+
 	return filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
+
+		// Saltar la carpeta contenedora, no registrar en FileCache
 		if info.IsDir() {
 			return nil
 		}
 
+		// Obtener ruta relativa (ej: dir1/a.txt)
 		relPath, _ := filepath.Rel("shared", path)
 
+		// Si el nodo está desconectado → registrar como pendiente
 		if !state.OnlineStatus[p.IP] {
 			state.FileCache[p.IP] = append(state.FileCache[p.IP], state.FileInfo{
 				Name:    relPath,
@@ -85,9 +90,12 @@ func sendDirectoryRecursively(p peer.PeerInfo, root string) error {
 			return nil
 		}
 
+		// Nodo en línea → enviar inmediatamente
 		return sendSingleFile(p, path, relPath)
 	})
 }
+
+
 
 // RequestFileFromPeer solicita un archivo desde otro nodo
 func RequestFileFromPeer(p peer.PeerInfo, filename string) error {

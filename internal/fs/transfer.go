@@ -307,16 +307,20 @@ func TransferFile(peerSystem *peer.Peer, selected SelectedFile, checkedPeers map
 	count := 0
 
 	if selected.PeerID != localID && !anyChecked(checkedPeers) {
-		for _, p := range peerSystem.Peers {
-			if p.ID == selected.PeerID {
-				if strings.HasSuffix(selected.FileName, "/") || strings.Contains(selected.FileName, "/") {
+	for _, p := range peerSystem.Peers {
+		if p.ID == selected.PeerID {
+			// Buscar si el archivo seleccionado es un directorio usando FileCache
+			for _, f := range state.FileCache[p.IP] {
+				if f.Name == selected.FileName && f.IsDir {
 					return 1, RequestDirectoryFromPeer(p, selected.FileName)
+					}
 				}
 				return 1, RequestFileFromPeer(p, selected.FileName)
 			}
 		}
 		return 0, fmt.Errorf("peer origen no encontrado")
 	}
+
 
 	if selected.PeerID == localID {
 		for targetID, checked := range checkedPeers {
